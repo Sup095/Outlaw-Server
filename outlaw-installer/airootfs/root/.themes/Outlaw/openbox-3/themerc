@@ -1,0 +1,48 @@
+# Outlaw OS — openbox theme (gold-on-gunmetal, matches CodeMaker + the greeter).
+# Minimal on purpose: unset keys fall back to openbox defaults, so this can't
+# break the WM. Colors mirror the gunmetal/gold palette used across Outlaw.
+
+border.width: 1
+padding.width: 6
+padding.height: 4
+window.handle.width: 0
+window.client.padding.width: 0
+menu.border.width: 1
+menu.overlap: 0
+
+# --- Active (focused) window ---
+window.active.title.bg: flat solid
+window.active.title.bg.color: #161b27
+window.active.title.separator.color: #2a3242
+window.active.label.text.color: #f4d27a
+window.active.label.text.justify: left
+window.active.border.color: #e0b341
+window.active.button.unpressed.image.color: #e0b341
+window.active.button.hover.image.color: #f4d27a
+window.active.button.pressed.image.color: #ffffff
+
+# --- Inactive window ---
+window.inactive.title.bg: flat solid
+window.inactive.title.bg.color: #0b0e14
+window.inactive.title.separator.color: #1d2433
+window.inactive.label.text.color: #838c9c
+window.inactive.label.text.justify: left
+window.inactive.border.color: #2a3242
+window.inactive.button.unpressed.image.color: #6f7787
+window.inactive.button.hover.image.color: #e0b341
+
+# --- Menus ---
+menu.title.bg: flat solid
+menu.title.bg.color: #161b27
+menu.title.text.color: #f4d27a
+menu.items.bg: flat solid
+menu.items.bg.color: #0b0e14
+menu.items.text.color: #e8eaed
+menu.items.active.bg: flat solid
+menu.items.active.bg.color: #1d2433
+menu.items.active.text.color: #f4d27a
+
+# --- OSD (e.g. resize/move feedback) ---
+osd.bg: flat solid
+osd.bg.color: #161b27
+osd.label.text.color: #f4d27a

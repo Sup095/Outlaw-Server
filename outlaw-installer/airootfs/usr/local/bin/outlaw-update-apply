@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-update-apply — atomically swap the on-disk Outlaw shell with a new
+# tarball downloaded by the shell's self-updater. Invoked via pkexec so the
+# user gets one Windows-style admin prompt per install (no passwordless root).
+#
+# Args: <tarball-path> <expected-sha256-hex>
+# ============================================================================
+set -euo pipefail
+
+TARBALL="${1:-}"
+EXPECTED="${2:-}"
+TARGET="/usr/share/outlaw-os"
+BACKUP="/usr/share/outlaw-os.prev"
+
+[[ $EUID -eq 0 ]] || { echo "Must run as root (use pkexec)." >&2; exit 1; }
+[[ -n "$TARBALL" && -f "$TARBALL" ]] || { echo "Tarball not found: $TARBALL" >&2; exit 2; }
+
+# Defence in depth: verify the SHA256 again even though the downloader did.
+if [[ -n "$EXPECTED" ]]; then
+    ACTUAL="$(sha256sum -- "$TARBALL" | awk '{print $1}')"
+    if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+        echo "SHA256 mismatch (expected $EXPECTED, got $ACTUAL)" >&2
+        exit 3
+    fi
+fi
+
+TMP="$(mktemp -d /tmp/outlaw-update.XXXXXX)"
+trap 'rm -rf "$TMP"' EXIT
+
+# Reject anything that isn't a real tarball.
+file -b "$TARBALL" | grep -qi 'gzip compressed\|POSIX tar\|tar archive' \
+    || { echo "Not a tar.gz: $TARBALL" >&2; exit 2; }
+
+tar --no-same-owner -xzf "$TARBALL" -C "$TMP"
+
+# The tarball may extract flat or under a top-level folder; find package.json.
+NEW="$TMP"
+if [[ ! -f "$TMP/package.json" ]]; then
+    PJ="$(find "$TMP" -maxdepth 2 -name package.json -type f | head -n1 || true)"
+    [[ -n "$PJ" ]] || { echo "Update payload has no package.json." >&2; exit 4; }
+    NEW="$(dirname "$PJ")"
+fi
+[[ -f "$NEW/main.js" && -f "$NEW/preload.js" ]] \
+    || { echo "Update payload is missing required files." >&2; exit 4; }
+
+# Refuse to install anything not named "outlaw-os" — guards against the wrong
+# tarball being mis-attached to a release.
+NAME="$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$NEW/package.json" | head -n1)"
+[[ "$NAME" == "outlaw-os" ]] \
+    || { echo "Refusing to install: package name is '$NAME', expected 'outlaw-os'." >&2; exit 5; }
+
+VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$NEW/package.json" | head -n1)"
+
+# --- Install bundled components (comprehensive update) ----------------------
+# A modern payload carries everything under components/, so a shell update now
+# also refreshes the /usr/local/bin helpers, the greeter, the first-boot wizard,
+# the GUI installer, the polkit rule and Outlaw CodeMaker's code — fixing the
+# old problem where the shell updated but the helper scripts didn't. Done BEFORE
+# the shell swap; the folder is removed afterwards so the shell dir stays clean.
+COMP="$NEW/components"
+PKG_MANIFEST=""          # stashed before $COMP is removed; synced after the swap
+if [[ -d "$COMP" ]]; then
+    echo "Installing components (helpers, greeter, first-boot, installer, CodeMaker)…"
+    if [[ -d "$COMP/bin" ]]; then
+        for f in "$COMP/bin"/outlaw-*; do
+            [[ -f "$f" ]] && install -Dm755 "$f" "/usr/local/bin/$(basename "$f")" \
+                && echo "  • helper: $(basename "$f")"
+        done
+    fi
+    for pair in "greeter:/usr/share/outlaw-greeter" \
+                "firstboot:/usr/share/outlaw-firstboot" \
+                "installer-gui:/usr/share/outlaw-installer-gui"; do
+        src="$COMP/${pair%%:*}"; dst="${pair##*:}"
+        if [[ -d "$src" ]]; then
+            mkdir -p "$dst"; cp -rT "$src" "$dst"; chown -R root:root "$dst"
+            echo "  • ${pair%%:*} -> $dst"
+        fi
+    done
+    [[ -f "$COMP/polkit/49-outlaw.rules" ]] \
+        && install -Dm644 "$COMP/polkit/49-outlaw.rules" /etc/polkit-1/rules.d/49-outlaw.rules \
+        && echo "  • polkit rule"
+    # CodeMaker: update the CODE only. cp -rT merges over the install, so the
+    # existing .venv, db/ and user data (not carried in the payload) are kept —
+    # the Dev session keeps working with its already-built environment.
+    if [[ -d "$COMP/codemaker" ]]; then
+        mkdir -p /opt/outlaw-codemaker
+        cp -rT "$COMP/codemaker" /opt/outlaw-codemaker
+        chown -R root:root /opt/outlaw-codemaker 2>/dev/null || true
+        echo "  • CodeMaker (code only — venv/db/user data kept)"
+    fi
+    # Stash the package manifest for the post-swap sync ($COMP is removed next,
+    # and $NEW gets moved into place).
+    if [[ -f "$COMP/packages.list" ]]; then
+        PKG_MANIFEST="$TMP/packages.list"
+        cp "$COMP/packages.list" "$PKG_MANIFEST"
+    fi
+    rm -rf "$COMP"
+fi
+
+# Atomic swap: keep the previous shell as $BACKUP so a bad release can be
+# rolled back with `mv /usr/share/outlaw-os.prev /usr/share/outlaw-os`.
+rm -rf "$BACKUP"
+[[ -d "$TARGET" ]] && mv "$TARGET" "$BACKUP"
+install -d "$(dirname "$TARGET")"
+mv "$NEW" "$TARGET"
+chown -R root:root "$TARGET"
+chmod -R go-w "$TARGET"
+
+echo "Outlaw shell updated to v${VERSION:-?}. Previous version kept at $BACKUP."
+
+# --- System package sync (comprehensive update) -----------------------------
+# #7/#9 — install any packages added since this machine was installed (e.g. the
+# audio stack) so an OTA update isn't "just the shell". Best-effort: the shell +
+# components already updated, so a mirror hiccup or an unavailable package must
+# NOT fail the whole update. We only ADD (--needed); we never auto-remove.
+#
+# ⚠ BOOT-SAFETY (regression fix): this MUST NOT be a partial upgrade. A previous
+# version ran `pacman -Sy --needed <subset>`, which refreshes the package DB to
+# newer-than-installed versions and then upgrades whichever shared libraries the
+# new packages pull in (an icu/glibc/gcc-libs soname bump is the classic case)
+# while the REST of the system stays on the old libs. That library mismatch can
+# stop Xorg/Electron/the greeter from launching — i.e. it can break the boot into
+# the desktop. On Arch a partial upgrade is explicitly unsupported.
+#
+# So: NO `-y`. We install ONLY from the already-synced local DB (`-S` without a
+# refresh), at versions that match the rest of the installed system — this can
+# never introduce a soname mismatch, so it can never break boot. The trade-off is
+# that a package that isn't resolvable from the current DB just won't install
+# here; that's a feature you re-run later, never a bricked desktop. (Genuinely
+# adding new packages the Arch-correct way needs a FULL `-Syu`, which belongs in
+# the planned full-reinstall updater, not an unattended background shell update.)
+if [[ -n "$PKG_MANIFEST" && -f "$PKG_MANIFEST" ]]; then
+    mapfile -t _pkgs < <(grep -E '^[a-z0-9][a-z0-9._+-]*$' "$PKG_MANIFEST")
+    if (( ${#_pkgs[@]} > 0 )); then
+        echo "Syncing system packages (${#_pkgs[@]} expected; installing any new/missing, no DB refresh)…"
+        if pacman -S --needed --noconfirm "${_pkgs[@]}"; then
+            echo "Package sync complete."
+        else
+            echo "Note: some packages couldn't be installed from the current package DB (offline, or they need a full system update). The shell + components update is fine and your system is unchanged; run a full system update later to finish packages." >&2
+        fi
+    fi
+fi
+
+# Diagnostic breadcrumb — records what version this machine last applied + when,
+# so "is the update actually applying?" can be answered at a glance.
+mkdir -p /var/lib/outlaw-os 2>/dev/null || true
+{ echo "version=${VERSION:-?}"; echo "applied=$(date -Iseconds 2>/dev/null || echo unknown)"; } \
+    > /var/lib/outlaw-os/last-update 2>/dev/null || true

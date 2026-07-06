@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-firstboot — launch the Electron first-boot wizard.
+# ----------------------------------------------------------------------------
+# Called once from ~/.xinitrc the first time a user logs in (gated on the
+# ~/.outlaw-firstboot-done marker file). Skipped on subsequent boots and on
+# the live ISO (live ISO uses /root/.xinitrc which doesn't call us).
+#
+# The wizard itself is at /usr/share/outlaw-firstboot/, bundled in by
+# outlaw-installer/build.sh during ISO assembly.
+#
+# Electron flags come from outlaw-electron-flags so we get --disable-gpu /
+# --disable-gpu-compositing automatically inside VirtualBox / QEMU and
+# avoid the silent black-screen-on-VM symptom.
+# ============================================================================
+
+set -u
+
+APP_DIR="${OUTLAW_FIRSTBOOT_PATH:-/usr/share/outlaw-firstboot}"
+
+if [[ ! -f "$APP_DIR/main.js" ]]; then
+    # Wizard isn't installed — just touch the marker so .xinitrc doesn't
+    # keep retrying us, and exit clean. Boot continues to the greeter.
+    echo "outlaw-firstboot: $APP_DIR/main.js missing — marking done and exiting." >&2
+    touch "$HOME/.outlaw-firstboot-done" 2>/dev/null || true
+    exit 0
+fi
+
+mapfile -t ELECTRON_FLAGS < <(outlaw-electron-flags 2>/dev/null || echo "--no-sandbox")
+exec electron "${ELECTRON_FLAGS[@]}" "$APP_DIR"

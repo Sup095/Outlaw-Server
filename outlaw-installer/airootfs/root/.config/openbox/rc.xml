@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ==========================================================================
+     Outlaw OS — openbox window-manager config (Phase 10: window mgmt polish).
+     Builds on the openbox + tint2 setup from 3b. GUARDED upstream: .xinitrc only
+     starts openbox if present and falls back to a no-WM kiosk otherwise, so a
+     bad config here can never block boot — openbox just logs and uses defaults.
+     ========================================================================== -->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <focus>
+    <!-- New app windows take focus (further fixes the old no-WM "can't type into
+         the window" class of bugs); raise the window you click. -->
+    <focusNew>yes</focusNew>
+    <followMouse>no</followMouse>
+    <raiseOnFocus>yes</raiseOnFocus>
+  </focus>
+
+  <placement>
+    <!-- Smart = don't pile every window at the top-left corner; lay them out so
+         they don't overlap when possible, centered on the active monitor. -->
+    <policy>Smart</policy>
+    <center>yes</center>
+    <monitor>Active</monitor>
+  </placement>
+
+  <theme>
+    <name>Outlaw</name>
+    <titleLayout>NLIMC</titleLayout>
+    <keepBorder>yes</keepBorder>
+    <animateIconify>no</animateIconify>
+  </theme>
+
+  <resistance>
+    <!-- Window snapping: windows resist passing through each other and the
+         screen edges, so they snap into place when dragged near. -->
+    <strength>12</strength>
+    <screen_edge_strength>20</screen_edge_strength>
+  </resistance>
+
+  <applications>
+    <!-- Keep the Outlaw shell as the desktop backdrop: it lives in the "below"
+         layer so launched apps always stack above it, and it has no title bar
+         (it's frameless). WM_CLASS is set to outlaw-shell by the shell itself.
+         Note: focus is left enabled — the shell is the primary UI and must take keyboard
+         input when nothing is above it; the "below" layer keeps it behind apps
+         regardless of focus. -->
+    <application class="outlaw-shell">
+      <layer>below</layer>
+      <decor>no</decor>
+    </application>
+  </applications>
+</openbox_config>

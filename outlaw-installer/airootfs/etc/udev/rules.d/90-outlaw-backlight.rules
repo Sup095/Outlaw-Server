@@ -1,0 +1,7 @@
+# Outlaw OS — let the operator (video group, see outlaw-install useradd) change
+# screen brightness WITHOUT a password prompt: make the backlight sysfs knob
+# group-writable by `video` when the device appears. This is the standard
+# desktop-Linux approach (same one brightnessctl's udev mode uses). The shell's
+# Settings → Display brightness slider writes this file directly; without the
+# rule it would need root for every nudge of the slider.
+ACTION=="add", SUBSYSTEM=="backlight", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"

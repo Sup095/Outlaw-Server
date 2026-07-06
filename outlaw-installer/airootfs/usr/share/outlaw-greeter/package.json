@@ -1,0 +1,8 @@
+{
+  "name": "outlaw-greeter",
+  "version": "1.0.0",
+  "description": "Outlaw OS session greeter — asks Dev session vs Desktop on each boot",
+  "main": "main.js",
+  "author": "Outlaw OS",
+  "license": "SEE LICENSE IN LICENSE"
+}

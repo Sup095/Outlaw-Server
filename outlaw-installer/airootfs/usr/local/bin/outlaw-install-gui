@@ -1,0 +1,24 @@
+#!/bin/sh
+# ============================================================================
+# outlaw-install-gui — launch the graphical Outlaw OS installer.
+# ----------------------------------------------------------------------------
+# Default path from the desktop's "Install Outlaw OS" button. Starts the
+# Electron wizard at /usr/share/outlaw-installer-gui and pulls keyboard/mouse
+# focus to it (the session has no window manager, so without the focus poke a
+# new window appears but can't be typed in). Falls back to the terminal
+# installer if the GUI app or Electron is missing.
+# ============================================================================
+APP=/usr/share/outlaw-installer-gui
+
+FLAGS="$(outlaw-electron-flags 2>/dev/null | tr '\n' ' ')"
+[ -z "$FLAGS" ] && FLAGS="--no-sandbox"
+
+if [ -f "$APP/main.js" ] && command -v electron >/dev/null 2>&1; then
+    # Focus poke runs in the background and grabs the window once it maps.
+    ( outlaw-focus "Outlaw OS Installer" 60 >/dev/null 2>&1 & ) 2>/dev/null
+    # shellcheck disable=SC2086  # intentional word-splitting of flags
+    exec electron $FLAGS "$APP"
+fi
+
+echo "outlaw-install-gui: GUI not available — opening the terminal installer." >&2
+exec outlaw-term "Outlaw OS Installer" outlaw-install

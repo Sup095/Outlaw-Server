@@ -1,0 +1,10 @@
+{
+  "name": "outlaw-firstboot",
+  "version": "1.0.0",
+  "description": "Outlaw OS first-boot setup wizard. Offers to install optional package bundles (Steam, Firefox, Godot) the first time a user logs in. After it runs, it touches ~/.outlaw-firstboot-done so it never appears again.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  }
+}

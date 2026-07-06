@@ -1,0 +1,250 @@
+/* ============================================================================
+   Outlaw OS first-boot wizard — minimal dark theme matching the rest of the
+   shell's visual language. Self-contained, no font imports (system fonts
+   only) so the wizard runs even with no network / no missing-glyph hassle.
+   ============================================================================ */
+
+:root {
+    --bg:        #0d0f12;
+    --bg-card:   #161a1f;
+    --bg-card-2: #1f242b;
+    --fg:        #e6e9ef;
+    --fg-muted:  #8a93a3;
+    --accent:    #f5a623;
+    --accent-dim: #b87a18;
+    --border:    #272d35;
+    --ok:        #4ade80;
+    --err:       #f87171;
+}
+
+/* Themed scrollbars — same look as the rest of the OS apps. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+::-webkit-scrollbar-thumb:active { background: var(--accent); }
+::-webkit-scrollbar-corner { background: var(--bg); }
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    overflow: hidden;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 28px 36px 24px;
+    /* Window is now fullscreen — keep the content a comfortable column centred
+       on the screen instead of stretching across a wide display. */
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.stage {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.stage-active {
+    display: flex;
+}
+
+header {
+    margin-bottom: 18px;
+}
+
+h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: var(--fg);
+}
+
+.sub {
+    margin-top: 6px;
+    color: var(--fg-muted);
+    max-width: 60ch;
+}
+
+/* ---- Bundle list ---- */
+
+.bundles {
+    flex: 1;
+    list-style: none;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.bundle {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.bundle:hover {
+    background: var(--bg-card-2);
+    border-color: var(--accent-dim);
+}
+
+.bundle input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+/* Network warning + in-wizard Wi-Fi */
+.net-warn {
+    border: 1px solid var(--accent); border-radius: 8px; background: rgba(245,166,35,.08);
+    padding: 12px 14px; margin-bottom: 14px; font-size: 13.5px; color: var(--fg);
+}
+.net-btns { display: flex; gap: 8px; margin-top: 10px; }
+.wifi-list { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; max-height: 240px; overflow-y: auto; }
+.dim { opacity: .7; padding: 6px 2px; }
+.wifi-row {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card);
+}
+.wifi-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wifi-meta { color: var(--fg-muted); font-size: 12px; flex: 0 0 auto; }
+.wifi-join { flex: 0 0 auto; padding: 5px 12px; }
+.wifi-pwform { display: flex; gap: 8px; padding: 8px 10px 8px 20px; border-left: 2px solid var(--accent-dim); margin: 2px 0 4px 10px; }
+.wifi-pwform input {
+    flex: 1; font: inherit; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 11px;
+}
+.wifi-pwform input:focus { outline: none; border-color: var(--accent); }
+
+.bundle-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.bundle-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.bundle-size {
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--fg-muted);
+}
+
+.bundle-desc {
+    color: var(--fg-muted);
+    font-size: 13px;
+}
+
+/* ---- Status-mode bundle rows (progress stage) ---- */
+
+.bundles-status .bundle {
+    cursor: default;
+}
+
+.bundle-status-icon {
+    display: inline-block;
+    width: 16px;
+    text-align: center;
+    margin-right: 6px;
+    color: var(--fg-muted);
+}
+
+.bundle.status-running .bundle-status-icon {
+    color: var(--accent);
+}
+.bundle.status-ok .bundle-status-icon {
+    color: var(--ok);
+}
+.bundle.status-err .bundle-status-icon {
+    color: var(--err);
+}
+
+/* ---- Live log pane ---- */
+
+.log {
+    margin-top: 12px;
+    padding: 10px 12px;
+    height: 200px;
+    overflow-y: auto;
+    background: #07090b;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: 'Cascadia Code', 'Consolas', 'Liberation Mono', monospace;
+    font-size: 12px;
+    color: #9aa3b2;
+    white-space: pre-wrap;
+}
+
+/* ---- Action footers ---- */
+
+.actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.actions-progress {
+    justify-content: flex-end;
+}
+
+button {
+    font: inherit;
+    padding: 9px 18px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: #0d0f12;
+    border-color: var(--accent);
+    font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) {
+    background: #ffb133;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--fg-muted);
+    border-color: var(--border);
+}
+.btn-secondary:hover:not(:disabled) {
+    color: var(--fg);
+    border-color: var(--fg-muted);
+}

@@ -1,0 +1,19 @@
+# ============================================================================
+# Outlaw OS — monthly thorough diagnostic
+# Runs on the 1st of every month at 04:00 local time. Includes the ClamAV
+# scan (if installed). Tied to outlaw-diagnose@thorough.service.
+# Disabled by default; user opts in from System Core → Diagnostics → Schedule.
+# ============================================================================
+
+[Unit]
+Description=Outlaw OS monthly thorough diagnostic
+Documentation=man:outlaw-diagnose(1)
+
+[Timer]
+OnCalendar=*-*-01 04:00:00
+RandomizedDelaySec=1h
+Persistent=true
+Unit=outlaw-diagnose@thorough.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,104 @@
+Outlaw Server License v1.0
+Copyright (c) 2026 the Outlaw Server maintainer ("the Author", GitHub: Sup095).
+All rights reserved, except as expressly granted below.
+
+This is a source-available license. It is NOT an open-source license and NOT a
+free-software license. Outlaw Server is shared so people can use it, learn from
+it, help improve it, and test it — not so it can be re-shipped or sold by anyone
+other than the Author.
+
+------------------------------------------------------------------------------
+1. SCOPE
+------------------------------------------------------------------------------
+This license covers the original work created by the Author in this repository:
+Outlaw Server's own source code, configuration, build scripts, branding,
+artwork, text, and the "Outlaw Server" name (collectively, "the Work").
+
+It does NOT cover third-party components that Outlaw Server bundles, installs,
+or depends on (the Linux kernel, Arch packages, Node.js, Docker, Pterodactyl,
+Portainer, Cockpit, Tailscale/WireGuard, fonts, etc.). Those remain under their
+own respective licenses, and nothing here grants or restricts rights in them
+beyond what their licenses say.
+
+------------------------------------------------------------------------------
+2. WHAT YOU MAY DO (no fee, no permission needed)
+------------------------------------------------------------------------------
+Subject to the conditions below, any person is granted a personal,
+non-exclusive, non-transferable, revocable license to:
+
+  (a) USE — install and run Outlaw Server on as many of your own machines as
+      you like, for personal, educational, or internal purposes.
+  (b) HOST — operate servers and services on machines running Outlaw Server,
+      including services offered to others and services you charge for (e.g. a
+      game server with paid membership). Charging for YOUR service is fine —
+      Section 4(b) only forbids selling the Work itself.
+  (c) STUDY — read, compile, and inspect the source code.
+  (d) MODIFY LOCALLY — change the Work on your own machines for your own use,
+      and for the purpose of developing improvements to submit back (Section 3).
+  (e) TEST — download, run, and evaluate pre-release / beta builds, and report
+      results.
+  (f) SUGGEST CHANGES — submit bug reports, feature requests, and patches /
+      pull requests to the Author's official repository.
+
+------------------------------------------------------------------------------
+3. CONTRIBUTIONS
+------------------------------------------------------------------------------
+You are encouraged to suggest changes. By submitting a contribution (patch, pull
+request, or similar) you grant the Author a perpetual, worldwide, royalty-free,
+irrevocable license to use, modify, relicense, and distribute that contribution
+as part of the Work. You confirm you have the right to grant this.
+
+------------------------------------------------------------------------------
+4. WHAT YOU MAY NOT DO
+------------------------------------------------------------------------------
+  (a) NO REDISTRIBUTION — you may not distribute, publish, mirror, host for
+      download, share, sublicense, lend, or otherwise make the Work (or any
+      modified version, fork, derivative, or repackaged build, including ISOs,
+      images, or installers) available to any third party. The Author is the
+      sole distributor of Outlaw Server. (Submitting changes to the Author's
+      official repository under Section 3 is allowed and encouraged.)
+  (b) NO MONETIZATION OF THE WORK — you may not sell, rent, license, or charge
+      any fee for the Work or for access to it, and you may not use it as a
+      paid product or bundle it into anything sold for money. (Charging for
+      services you HOST on it is expressly allowed — see Section 2(b).)
+  (c) NO REMOVAL OF NOTICES — you may not remove or alter this license,
+      copyright notices, or the "Outlaw Server" branding to pass the Work off
+      as your own or as unrelated.
+
+------------------------------------------------------------------------------
+5. DONATIONS
+------------------------------------------------------------------------------
+Voluntary donations or sponsorships to the Author (e.g. via the repository's
+sponsor button) are permitted and welcome. A donation buys no additional rights
+and is never required to use Outlaw Server.
+
+------------------------------------------------------------------------------
+6. NO WARRANTY
+------------------------------------------------------------------------------
+THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NONINFRINGEMENT. Outlaw Server can modify partitions,
+bootloaders, firewall rules, and system settings, and can expose management
+interfaces over a network; you configure and run it entirely at your own risk.
+Secure your credentials, keep 2FA enabled, and prefer private-network (VPN)
+access — the Author is not responsible for compromised or misconfigured
+deployments.
+
+------------------------------------------------------------------------------
+7. LIMITATION OF LIABILITY
+------------------------------------------------------------------------------
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, DATA LOSS, OR
+OTHER LIABILITY, WHETHER IN CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+OR IN CONNECTION WITH THE WORK OR ITS USE.
+
+------------------------------------------------------------------------------
+8. TERMINATION
+------------------------------------------------------------------------------
+This license terminates automatically if you breach it (in particular Section 4).
+On termination you must stop using the Work and destroy your copies, except any
+contributions already submitted to the Author. The Author may grant written
+exceptions to any term above; ask.
+
+------------------------------------------------------------------------------
+For permissions beyond this license (redistribution, commercial use, etc.),
+contact the Author via the official repository.

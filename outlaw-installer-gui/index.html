@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:;">
+    <title>Outlaw OS Installer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main id="wizard">
+
+    <!-- 0 · Welcome -->
+    <section class="step active" id="step-welcome">
+        <h1>⛨ Install Outlaw OS</h1>
+        <p class="lead">This wizard puts Outlaw OS on this computer. It's safe by default:
+           the <b>recommended option keeps Windows and your files</b> — Outlaw just moves in next door.</p>
+        <p class="lead dim">You can stop any time before the final confirmation. Nothing is changed until then.</p>
+        <div class="warnbox" id="net-warn" hidden>
+            ⚠ <b>No internet connection.</b> Installing downloads packages, so connect first —
+            plug in a network cable (works automatically) or join a Wi-Fi network right here:
+            <div class="netbtns">
+                <button id="wifi-show">📶 Show Wi-Fi networks</button>
+                <button id="net-retry">⟳ Check again</button>
+            </div>
+            <div id="wifi-area" class="wifi-list" hidden></div>
+        </div>
+        <div class="okbox" id="net-ok" hidden>✔ Internet connection looks good.</div>
+        <div class="nav">
+            <button class="ghost" id="btn-exit">Exit installer</button>
+            <span class="grow"></span>
+            <button class="primary big" id="btn-start">Continue ▸</button>
+        </div>
+    </section>
+
+    <!-- 1 · Mode -->
+    <section class="step" id="step-mode">
+        <h2>How do you want to install?</h2>
+        <div class="cards">
+            <button class="card" data-mode="alongside">
+                <div class="card-title">🛡 Keep my other OS <span class="tag">recommended</span></div>
+                <div class="card-desc">Windows / Linux and all your files stay. Outlaw uses free space —
+                    or shrinks your biggest partition automatically (your files are kept; the partition
+                    just gets smaller). A boot menu lets you pick an OS each start.</div>
+            </button>
+            <button class="card danger-card" data-mode="wipe">
+                <div class="card-title">🧨 Erase this computer</div>
+                <div class="card-desc">Wipes one whole disk — <b>everything on it is deleted</b> —
+                    and makes Outlaw OS the only system. For old or empty machines.</div>
+            </button>
+        </div>
+        <div class="nav"><button class="ghost" data-back="step-welcome">◂ Back</button></div>
+    </section>
+
+    <!-- 2 · Disk -->
+    <section class="step" id="step-disk">
+        <h2 id="disk-title">Choose a disk</h2>
+        <p class="lead dim" id="disk-sub"></p>
+        <div id="disk-list" class="cards"></div>
+        <div class="nav"><button class="ghost" data-back="step-mode">◂ Back</button></div>
+    </section>
+
+    <!-- 3 · Space (alongside only) -->
+    <section class="step" id="step-space">
+        <h2>How much space for Outlaw?</h2>
+        <div id="space-free" hidden>
+            <p class="lead">There's <b><span id="free-gib">0</span> GiB of free space</b> on this disk —
+               no shrinking needed.</p>
+        </div>
+        <div id="space-shrink" hidden>
+            <p class="lead">No free space yet — pick which partition gives some up.
+               <b>Your files on it are kept</b>; the partition just gets smaller.</p>
+            <div id="shrink-list" class="cards small"></div>
+        </div>
+        <div class="sizerow">
+            <label for="size-gib">Outlaw OS size:</label>
+            <input type="range" id="size-slider" min="16" max="64" step="1" value="32">
+            <input type="number" id="size-gib" min="16" max="64" value="32"> GiB
+        </div>
+        <p class="dim" id="size-hint">16 GiB minimum · 32+ GiB recommended (room for Steam games and projects).</p>
+        <div class="nav">
+            <button class="ghost" data-back="step-disk">◂ Back</button>
+            <span class="grow"></span>
+            <button class="primary" id="btn-space-next">Continue ▸</button>
+        </div>
+    </section>
+
+    <!-- 4 · Account -->
+    <section class="step" id="step-account">
+        <h2>Create your account</h2>
+        <div class="form">
+            <label>Username
+                <input id="acc-user" type="text" autocomplete="off" spellcheck="false"
+                       placeholder="lowercase, e.g. outlaw">
+                <small id="user-msg" class="dim">Lowercase letters, digits, '-' or '_' — starts with a letter.</small>
+            </label>
+            <label>Password
+                <input id="acc-pw1" type="password" placeholder="choose a password">
+            </label>
+            <label>Repeat password
+                <input id="acc-pw2" type="password" placeholder="same password again">
+                <small id="pw-msg" class="dim">Used to log in and for admin (sudo) actions.</small>
+            </label>
+        </div>
+        <div class="nav">
+            <button class="ghost" id="btn-account-back">◂ Back</button>
+            <span class="grow"></span>
+            <button class="primary" id="btn-account-next">Continue ▸</button>
+        </div>
+    </section>
+
+    <!-- 5 · Confirm -->
+    <section class="step" id="step-confirm">
+        <h2>Ready — please review</h2>
+        <ul id="plan" class="plan"></ul>
+        <div class="warnbox" id="confirm-warn"></div>
+        <div class="form">
+            <label>Type <b id="confirm-word">INSTALL</b> to begin:
+                <input id="confirm-input" type="text" autocomplete="off" spellcheck="false">
+            </label>
+        </div>
+        <div class="nav">
+            <button class="ghost" data-back="step-account">◂ Back</button>
+            <span class="grow"></span>
+            <button class="primary big" id="btn-go" disabled>Install now ▸</button>
+        </div>
+    </section>
+
+    <!-- 6 · Progress -->
+    <section class="step" id="step-progress">
+        <h2>Installing Outlaw OS…</h2>
+        <p class="lead dim">Keep the computer plugged in. This takes 10–40 minutes —
+           you don't need to touch anything.</p>
+        <ol id="stages" class="stages">
+            <li data-stage="network">Internet + package mirrors</li>
+            <li data-stage="shrink">Shrinking the partition</li>
+            <li data-stage="partition">Creating Outlaw's partition</li>
+            <li data-stage="format">Formatting</li>
+            <li data-stage="pacstrap">Downloading + installing the system</li>
+            <li data-stage="configure">Configuring</li>
+            <li data-stage="bootloader">Accounts + boot menu</li>
+            <li data-stage="devenv">Dev session (Outlaw CodeMaker)</li>
+        </ol>
+        <pre id="log" class="log"></pre>
+    </section>
+
+    <!-- 7 · Done / Error -->
+    <section class="step" id="step-done">
+        <h1 id="done-title">✅ All done</h1>
+        <p class="lead" id="done-msg"></p>
+        <div class="nav">
+            <button class="ghost" id="btn-done-exit">Back to the desktop</button>
+            <span class="grow"></span>
+            <button class="primary big" id="btn-reboot" hidden>Reboot now ▸</button>
+            <button class="primary big" id="btn-again" hidden>Try again</button>
+        </div>
+    </section>
+
+</main>
+<script src="renderer.js"></script>
+</body>
+</html>

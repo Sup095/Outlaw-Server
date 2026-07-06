@@ -1,0 +1,26 @@
+##
+## Outlaw OS — default package mirrors
+## ---------------------------------------------------------------------------
+## The slim Outlaw live ISO doesn't ship `reflector`, so (unlike a stock Arch
+## ISO) nothing regenerates this list on boot. Without at least one active
+## `Server =` line, pacstrap and the Apps panel can't download anything and you
+## get "could not connect to server" / "failed to install packages".
+##
+## So we ship a small, reliable default list, with the Arch global CDN first
+## (geo-routed, Tier-0, very high availability). Replace these with faster local
+## mirrors any time — or, if you install `reflector`, run:
+##   reflector --latest 20 --sort rate --save /etc/pacman.d/mirrorlist
+## ---------------------------------------------------------------------------
+
+## Arch global CDN (geo-routed) — the safe default.
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+
+## Arch continental CDNs.
+Server = https://america.mirror.pkgbuild.com/$repo/os/$arch
+Server = https://europe.mirror.pkgbuild.com/$repo/os/$arch
+Server = https://asia.mirror.pkgbuild.com/$repo/os/$arch
+
+## Stable Tier-1 fallbacks.
+Server = https://mirror.rackspace.com/archlinux/$repo/os/$arch
+Server = https://mirrors.kernel.org/archlinux/$repo/os/$arch
+Server = https://mirror.leaseweb.net/archlinux/$repo/os/$arch

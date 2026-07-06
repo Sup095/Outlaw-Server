@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-perf — switch the CPU frequency governor (gaming performance toggle).
+# Invoked by the shell via pkexec. Only accepts a fixed allowlist of governors,
+# so it can never be coerced into running arbitrary commands.
+# ============================================================================
+set -euo pipefail
+
+GOV="${1:-schedutil}"
+case "$GOV" in
+    performance|schedutil|powersave|ondemand|conservative) ;;
+    *) echo "Invalid governor: $GOV" >&2; exit 2 ;;
+esac
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Must run as root (use pkexec)." >&2
+    exit 1
+fi
+
+count=0
+for c in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    [[ -w "$c" ]] || continue
+    # Only set it if the governor is actually available for this CPU.
+    avail_file="$(dirname "$c")/scaling_available_governors"
+    if [[ -r "$avail_file" ]] && grep -qw "$GOV" "$avail_file"; then
+        echo "$GOV" > "$c" && count=$((count + 1))
+    fi
+done
+
+if [[ $count -eq 0 ]]; then
+    echo "No CPUs accepted governor '$GOV' (cpufreq may be unavailable)." >&2
+    exit 3
+fi
+echo "Set governor '$GOV' on $count core(s)."

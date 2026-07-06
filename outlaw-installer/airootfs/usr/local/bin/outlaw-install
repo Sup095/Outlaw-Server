@@ -1,0 +1,1009 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-install — guided installer for Outlaw OS
+# ----------------------------------------------------------------------------
+# TWO front-ends, one engine:
+#   * GUI  — /usr/local/bin/outlaw-install-gui (Electron wizard, the default
+#            path from the desktop's "Install Outlaw OS" button). It drives
+#            THIS script's machine modes:
+#               --probe-extras                     (line-based hardware probe)
+#               --auto-wipe   DISK USER            (password on stdin line 1)
+#               --auto-free   DISK GIB USER        (password on stdin line 1)
+#               --auto-shrink PART TAKE_GIB USER   (password on stdin line 1)
+#            Machine modes emit "@@STAGE id label" / "@@ERROR msg" markers.
+#   * TTY  — run `sudo outlaw-install` for the interactive text installer
+#            (recovery / SSH / preference). Two simple choices: install
+#            ALONGSIDE other OSes (uses free space, can shrink Windows/Linux
+#            partitions automatically) or ERASE a whole disk.
+#
+# SAFETY: "alongside" never formats existing partitions; shrinking is probed
+# read-only first and refuses dirty/unsupported filesystems. Wiping a disk
+# requires typing the device name AND the word ERASE.
+#
+# Bootloader: GRUB with os-prober enabled, so other operating systems are
+# detected and added to the boot menu — which is what powers `outlaw-hotswap`.
+# ============================================================================
+set -uo pipefail
+
+# ESSENTIAL_PKGS — the MINIMUM set needed to (a) boot the installed system,
+# (b) bring up the Electron shell + greeter, and (c) run Outlaw CodeMaker.
+# Everything else lives in optional bundles that the first-boot wizard
+# (/usr/share/outlaw-firstboot) lets the user opt into on first login.
+#
+# Why split? A failure in any single package causes pacstrap to abort and
+# leaves the user with a half-installed system. Keeping the install slim
+# shrinks the failure surface and lets users decline things they don't
+# want (e.g. gaming users who don't need Godot, devs who don't want Steam).
+# steamcmd remains AUR-only — see Outlaw CodeMaker/core/aur_install.py.
+ESSENTIAL_PKGS=(
+  # Base system
+  base linux linux-firmware intel-ucode amd-ucode mkinitcpio
+  sudo polkit networkmanager curl wget git nano
+  # pacman-contrib: provides `checkupdates` (safe update check without touching
+  # the live DB), used by the System Package Updates panel.
+  pacman-contrib
+  # zram-generator: compressed-RAM swap that outlaw-tune ("Tune This PC")
+  # enables on low-memory machines. No effect unless tuning writes its config.
+  zram-generator
+
+  # Bootloader / install tooling
+  grub efibootmgr os-prober dosfstools mtools gptfdisk parted
+
+  # Security hardening
+  apparmor firejail ufw
+
+  # X / desktop runtime
+  xorg-server xorg-xinit picom feh rofi thunar xfce4-terminal electron
+  # openbox (tiny WM: title bars / minimize / maximize / close) + tint2 (taskbar
+  # for minimized windows). Guarded in .xinitrc — absent = old no-WM kiosk.
+  openbox tint2
+  # polkit-gnome: authentication agent so `pkexec pacman …` (Apps panel +
+  # updater) can prompt for the password. The session has no WM/agent
+  # otherwise, which makes package installs fail on the installed system.
+  polkit-gnome
+  # fuse2: lets AppImages (e.g. the LM Studio download) mount and run. The
+  # outlaw-lm-studio launcher also falls back to --appimage-extract-and-run, but
+  # native FUSE mounting is faster and fixes double-clicking AppImages in Files.
+  fuse2
+  # Audio — the PipeWire stack (modern Arch default). WITHOUT THIS THE INSTALLED
+  # SYSTEM HAS NO SOUND. pipewire-pulse / pipewire-alsa give Pulse/ALSA app
+  # compatibility (games, browsers, Godot); wireplumber is the session manager;
+  # alsa-utils provides amixer/alsactl and backs the desktop's volume control.
+  # Socket-activated by the user's systemd instance on login (pam_systemd) — no
+  # manual start needed. Verify on a test pass: play any sound + the topbar slider.
+  pipewire pipewire-pulse pipewire-alsa wireplumber alsa-utils
+  ttf-jetbrains-mono noto-fonts mesa
+  # Xorg video fallbacks. Primary path is modesetting over the GPU's KMS
+  # driver (vmwgfx / vboxvideo / real GPU); these two are auto-fallbacks Xorg
+  # tries if that can't open a screen: vesa (real-mode VESA BIOS) and fbdev
+  # (/dev/fb0). No forced driver, no nomodeset. (xf86-video-vmware was dropped
+  # from the Arch repos; vmwgfx in-kernel covers VMSVGA.)
+  xf86-video-vesa xf86-video-fbdev
+
+  # VirtualBox compatibility. The kernel modules auto-load only when VBox
+  # is detected on boot, so this is harmless on real hardware — but for
+  # users testing the ISO in VBox / VBox-based VMs, it provides the proper
+  # vboxvideo driver and ensures the shell isn't stuck on the fallback
+  # framebuffer (which on VBox without 3D is what causes the black-screen
+  # symptom). ~10 MB on disk.
+  virtualbox-guest-utils
+
+  # Python + build tools (needed for the CodeMaker venv to compile any
+  # native pip wheels for pyautogui / pytesseract / pillow on this host)
+  python python-pip base-devel cmake
+
+  # Outlaw CodeMaker runtime deps (X11 input + OCR backend for pyautogui /
+  # pytesseract). The Python packages themselves live in a venv created in
+  # /opt/outlaw-codemaker/.venv during this install (see post-pacstrap step).
+  xdotool scrot tesseract tesseract-data-eng
+
+  # ollama: local LLM runtime for the on-device AI + the "AI runs your system"
+  # feature (Phase 13). Serves an OpenAI-compatible API on 127.0.0.1:11434; a
+  # tiny model gets pulled after first boot so AI works without manual setup.
+  ollama
+
+  # Desktop notifications. dunst is a tiny notification DAEMON (the freedesktop
+  # org.freedesktop.Notifications server) and libnotify provides `notify-send`.
+  # WITHOUT THESE the shell's AI `notify` action (and any notify-send) is a no-op
+  # — nothing appears on screen. dunst is autostarted (guarded) in .xinitrc.
+  dunst libnotify
+
+  # Removable media / USB drives. udisks2 is the storage daemon (D-Bus activated,
+  # no autostart needed), gvfs is the virtual-filesystem backend Thunar uses to
+  # mount/unmount, and thunar-volman auto-mounts drives when you plug them in.
+  # WITHOUT THESE, plugging in a USB stick does nothing and Thunar can't mount it.
+  udisks2 gvfs thunar-volman
+
+  # xdg-user-dirs: creates the standard ~/Downloads, ~/Documents, ~/Pictures …
+  # folders (run once on first login) so the Files app and apps have real
+  # user directories instead of a bare home. Lightweight, no daemon.
+  xdg-user-dirs
+
+  # Bluetooth. bluez is the stack + bluetooth.service daemon (enabled below),
+  # bluez-utils gives `bluetoothctl`, and blueman is the GTK manager the shell's
+  # "Pair a device…" button opens (blueman-manager). WITHOUT these there is no
+  # Bluetooth at all — the airplane toggle only rfkills a non-existent adapter.
+  bluez bluez-utils blueman
+
+  # Night light (Settings → Desktop). gammastep warms the screen's color
+  # temperature via the X gamma ramp (one-shot manual mode, no daemon). WITHOUT
+  # it the shell's night-light toggle reports "not installed" and stays a no-op.
+  gammastep
+)
+
+# OPTIONAL_BUNDLES — installed by /usr/share/outlaw-firstboot AFTER the user
+# logs in for the first time. The wizard shows each bundle as a checkbox
+# (defaulting to checked) and lets the user opt out of any of them. Bundle
+# definitions inside outlaw-firstboot/main.js must stay in sync with what's
+# listed here as a comment for the maintainer's reference:
+#
+#   steam-gaming: steam, gamemode, lib32-gamemode, gamescope, mangohud,
+#                 lib32-mangohud, vulkan-icd-loader, lib32-vulkan-icd-loader,
+#                 vulkan-tools, lib32-mesa
+#   firefox:      firefox
+#   godot:        godot
+#
+# Anything else (Blender, GIMP, VS Code, Lutris, Wine, etc.) stays available
+# on demand via the shell's Apps panel after first login.
+
+PKGS=("${ESSENTIAL_PKGS[@]}")
+
+red()  { printf '\033[31m%s\033[0m\n' "$*"; }
+grn()  { printf '\033[32m%s\033[0m\n' "$*"; }
+ylw()  { printf '\033[33m%s\033[0m\n' "$*"; }
+hr()   { printf '%s\n' "=================================================="; }
+
+# AUTO_MODE=1 → driven by the GUI: no prompts, emit @@ machine markers.
+AUTO_MODE=0
+emit()  { [[ "$AUTO_MODE" = 1 ]] && printf '@@%s\n' "$*"; return 0; }
+# F1/C16 — mirror installer errors into the shared error log so the live boot's
+# "Report a problem" can ship a failed-install report. Best-effort + deduped.
+errlog() {
+    local ts msg f home; ts="$(date -Iseconds 2>/dev/null || echo now)"; msg="$*"
+    for home in /root "${SUDO_USER:+/home/$SUDO_USER}" "$HOME"; do
+        [[ -n "$home" && -d "$home" ]] || continue
+        f="$home/.outlaw-errors.log"
+        if grep -qF "ERROR installer: $msg" "$f" 2>/dev/null; then continue; fi
+        printf '[%s] ERROR installer: %s\n' "$ts" "$msg" >>"$f" 2>/dev/null || true
+    done
+}
+stage() { emit "STAGE $1 $2"; grn "== $2"; }
+die()   { errlog "$*"; emit "ERROR $*"; red "ERROR: $*"; exit 1; }
+
+[[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+is_efi() { [[ -d /sys/firmware/efi/efivars ]]; }
+
+TARGET=/mnt
+BIOS_DISK=""
+ESP=""
+
+cleanup() { umount -R "$TARGET" 2>/dev/null || true; }
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Terminal helpers (interactive mode)
+# ---------------------------------------------------------------------------
+banner() {
+    clear
+    hr
+    grn "            OUTLAW OS INSTALLER v2.0"
+    hr
+    if is_efi; then echo "Firmware: UEFI"; else echo "Firmware: BIOS/Legacy"; fi
+    echo
+}
+
+# Repair the terminal before any prompt. A previous silent read (password) or
+# a tool poking at the tty can leave ECHO off — then "typing does nothing"
+# (keys register but aren't shown). `stty sane` restores echo + line mode.
+fix_tty() { stty sane 2>/dev/null || true; }
+
+# Drop any keystrokes typed while a long non-interactive step (mkfs, pacstrap,
+# parted…) was running. The terminal buffers them, and the next `read` silently
+# consumes a stale Enter as its answer.
+flush_stdin() {
+    local _junk
+    while read -r -t 0 2>/dev/null; do
+        read -r _junk || break
+    done
+}
+
+pick_from_lsblk() {
+    # $1 = prompt; echoes the chosen /dev path on stdout
+    echo >&2
+    lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINTS >&2
+    echo >&2
+    fix_tty; flush_stdin
+    read -rp "$1 (e.g. /dev/sda, or just sda) and press Enter: " dev
+    # lsblk shows bare kernel names, so users naturally type "sda" — accept it.
+    if [[ -n "$dev" && "$dev" != "0" && "$dev" != /dev/* ]]; then
+        dev="/dev/$dev"
+    fi
+    echo "$dev"
+}
+
+confirm_word() {
+    # $1 = the exact word the user must type
+    local typed
+    fix_tty; flush_stdin
+    read -rp "Type '$1' and press Enter to proceed (anything else cancels): " typed
+    [[ "$typed" == "$1" ]]
+}
+
+pause_enter() {
+    fix_tty; flush_stdin
+    read -rp "${1:-Press Enter to continue…}" _
+}
+
+# Ask for the operator account. Re-prompts on bad input instead of dying — a
+# typo (or a stale buffered Enter) must never abort an install that already
+# formatted a partition. Sets globals USERNAME and PW.
+ask_username() {
+    fix_tty; flush_stdin
+    while :; do
+        read -rp "Choose a username (lowercase, e.g. 'outlaw'), then press Enter: " USERNAME
+        [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]] && return 0
+        ylw "Invalid username — use lowercase letters/digits/'-'/'_', starting with a letter. Try again."
+    done
+}
+
+ask_password() {
+    local pw2
+    fix_tty; flush_stdin
+    while :; do
+        read -rsp "Choose a password for $USERNAME (typing is hidden), then press Enter: " PW; echo
+        read -rsp "Type the same password again, then press Enter: " pw2; echo
+        fix_tty
+        [[ "$PW" == "$pw2" && -n "$PW" ]] && return 0
+        red "Passwords did not match (or were empty). Try again."
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Probing (shared by GUI + terminal)
+# ---------------------------------------------------------------------------
+
+# Largest free/unallocated region on a disk. Echoes "<start_mib> <size_mib>".
+largest_free_region() {
+    local disk="$1" best_start=0 best_size=0 f_start f_end f_size _l s z si zi
+    while read -r f_start f_end f_size _l; do
+        s="${f_start%MiB}"; z="${f_size%MiB}"
+        [[ "$s" =~ ^[0-9.]+$ && "$z" =~ ^[0-9.]+$ ]] || continue
+        si="${s%.*}"; zi="${z%.*}"
+        if (( zi > best_size )); then best_size="$zi"; best_start="$si"; fi
+    done < <(parted -s "$disk" unit MiB print free 2>/dev/null | grep -iE 'free space')
+    echo "$best_start $best_size"
+}
+
+# Existing EFI System Partition on a disk (or empty).
+find_esp_on() {
+    lsblk -nrpo NAME,PARTTYPE "$1" 2>/dev/null \
+        | awk 'tolower($2)=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print $1; exit}'
+}
+
+# Minimum size (MiB) a partition's filesystem can shrink to. Read-only probe.
+# Prints the number; non-zero exit = not shrinkable (unsupported fs, dirty
+# NTFS, probe failure…).
+partition_min_mib() {
+    local part="$1" fstype min_b="" blocks bsize
+    fstype="$(blkid -o value -s TYPE "$part" 2>/dev/null || true)"
+    case "$fstype" in
+        ntfs)
+            # --info --no-action is read-only; fails if the volume is dirty
+            # (Windows Fast Startup / unclean shutdown), which is exactly when
+            # we must NOT touch it.
+            min_b="$(ntfsresize --info --no-action "$part" 2>/dev/null \
+                     | sed -n 's/.*resize at \([0-9][0-9]*\) bytes.*/\1/p' | head -n1)"
+            ;;
+        ext4|ext3|ext2)
+            blocks="$(resize2fs -P "$part" 2>/dev/null | sed -n 's/.*: \([0-9][0-9]*\).*/\1/p' | head -n1)"
+            bsize="$(dumpe2fs -h "$part" 2>/dev/null | sed -n 's/^Block size:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n1)"
+            [[ -n "$blocks" && -n "$bsize" ]] && min_b=$(( blocks * bsize ))
+            ;;
+        *) return 1 ;;
+    esac
+    [[ -n "$min_b" ]] || return 1
+    echo $(( min_b / 1024 / 1024 ))
+}
+
+# The disk the live USB itself lives on — never offer it as an install target.
+live_usb_disk() {
+    local src pk
+    src="$(findmnt -nro SOURCE /run/archiso/bootmnt 2>/dev/null || true)"
+    [[ -n "$src" && -b "$src" ]] || return 0
+    pk="$(lsblk -nro PKNAME "$src" 2>/dev/null | head -n1)"
+    [[ -n "$pk" ]] && echo "/dev/$pk" || echo "$src"
+}
+
+# Machine-readable probe for the GUI. Line protocol (stable, easy to parse):
+#   EFI 0|1
+#   LIVEUSB <disk-or-->
+#   DISK <path> SIZE_MIB <n> MODEL <free text…>
+#   FREE <disk> START_MIB <s> SIZE_MIB <z>
+#   ESP <disk> <part-or-->
+#   SHRINK <part> FSTYPE <fs> SIZE_MIB <n> MIN_MIB <m>
+probe_extras() {
+    local efi=0; is_efi && efi=1
+    echo "EFI $efi"
+    echo "LIVEUSB $(live_usb_disk || true)"
+    local disk model size_b size_mib free esp part ptype fs psize_b min
+    while read -r disk; do
+        [[ -b "$disk" ]] || continue
+        size_b="$(blockdev --getsize64 "$disk" 2>/dev/null || echo 0)"
+        size_mib=$(( size_b / 1024 / 1024 ))
+        model="$(lsblk -dnro MODEL "$disk" 2>/dev/null | head -n1)"
+        echo "DISK $disk SIZE_MIB $size_mib MODEL ${model:--}"
+        read -r fstart fsize < <(largest_free_region "$disk")
+        echo "FREE $disk START_MIB ${fstart:-0} SIZE_MIB ${fsize:-0}"
+        esp="$(find_esp_on "$disk" || true)"
+        echo "ESP $disk ${esp:--}"
+        while read -r part ptype; do
+            [[ "$ptype" == "part" ]] || continue
+            fs="$(blkid -o value -s TYPE "$part" 2>/dev/null || true)"
+            case "$fs" in ntfs|ext4|ext3|ext2) ;; *) continue ;; esac
+            psize_b="$(blockdev --getsize64 "$part" 2>/dev/null || echo 0)"
+            if min="$(partition_min_mib "$part")"; then
+                echo "SHRINK $part FSTYPE $fs SIZE_MIB $(( psize_b / 1024 / 1024 )) MIN_MIB $min"
+            fi
+        done < <(lsblk -nrpo NAME,TYPE "$disk" 2>/dev/null)
+    done < <(lsblk -dnpo NAME,TYPE 2>/dev/null | awk '$2=="disk"{print $1}')
+}
+
+# ---------------------------------------------------------------------------
+# Disk operations (shared)
+# ---------------------------------------------------------------------------
+
+# Shrink a partition's filesystem AND its partition-table entry by TAKE GiB.
+# Probed read-only first; refuses dirty NTFS and tight fits. NTFS gets a
+# Windows-side chkdsk scheduled automatically on its next boot (normal).
+# Re-read the partition table and WAIT for udev to finish so the kernel + parted
+# agree on the new geometry. A bare `partprobe; sleep 1` often races on slower
+# disks — the freed region then looks absent and the install aborts even though
+# the shrink worked. B5 hardening.
+settle_disk() {
+    local disk="$1"
+    sync
+    partprobe "$disk" 2>/dev/null || true
+    udevadm settle --timeout=10 2>/dev/null || true
+}
+
+shrink_partition() {
+    local part="$1" take_gib="$2"
+    local disk partnum fstype size_b size_mib min_mib new_mib start_mib
+    disk="/dev/$(lsblk -nro PKNAME "$part" | head -n1)"
+    [[ -b "$disk" ]] || die "Couldn't find the disk that $part belongs to."
+    partnum="$(grep -oE '[0-9]+$' <<<"$part")"
+    [[ -n "$partnum" ]] || die "Couldn't work out the partition number of $part."
+    fstype="$(blkid -o value -s TYPE "$part" 2>/dev/null || true)"
+    size_b="$(blockdev --getsize64 "$part")"
+    size_mib=$(( size_b / 1024 / 1024 ))
+    min_mib="$(partition_min_mib "$part")" \
+        || die "Can't measure $part. If that's a Windows disk: boot Windows, turn OFF Fast Startup, run 'chkdsk /f', shut down fully (don't restart), then try again."
+    new_mib=$(( size_mib - take_gib * 1024 ))
+    (( new_mib >= min_mib + 1024 )) \
+        || die "Not enough free room inside $part to give up ${take_gib} GiB (it can spare at most $(( (size_mib - min_mib - 1024) / 1024 )) GiB)."
+
+    umount "$part" 2>/dev/null || true
+    stage shrink "Shrinking $part by ${take_gib} GiB (filesystem first, then partition)…"
+    case "$fstype" in
+        ntfs)
+            # Dry-run first; -s uses MB (10^6) so the partition (MiB) always
+            # ends past the filesystem — safe direction.
+            ntfsresize --no-action -s "${new_mib}M" "$part" >/dev/null \
+                || die "Windows refused a test-shrink of $part. Boot Windows, run 'chkdsk /f', disable Fast Startup, shut down fully, then retry."
+            # The REAL resize prompts "Are you sure you want to proceed (y/[N])?"
+            # and reads stdin — run non-interactively (GUI / pkexec, no terminal)
+            # it gets EOF, answers N, and aborts with "nothing changed". Feed it a
+            # 'y' (printf, not `yes`, so pipefail can't trip on SIGPIPE), and keep
+            # the output so a genuine failure is reported instead of a generic one.
+            local _nr_out
+            if ! _nr_out="$(printf 'y\n' | ntfsresize -f -s "${new_mib}M" "$part" 2>&1)"; then
+                printf '%s\n' "$_nr_out" >&2
+                die "NTFS shrink failed on $part — nothing else was changed. ($(printf '%s' "$_nr_out" | grep -iE 'error|fail|cannot|refus|dirty|denied' | tail -n1))"
+            fi
+            ;;
+        ext4|ext3|ext2)
+            e2fsck -f -y "$part" >/dev/null 2>&1 || true
+            resize2fs "$part" "${new_mib}M" \
+                || die "ext4 shrink failed on $part — nothing else was changed."
+            ;;
+        *) die "Can't shrink $fstype partitions (only NTFS and ext2/3/4)." ;;
+    esac
+
+    start_mib="$(parted -s "$disk" unit MiB print 2>/dev/null \
+                 | awk -v n="$partnum" '$1==n {gsub("MiB","",$2); print int($2); exit}')"
+    [[ -n "$start_mib" ]] || die "Couldn't read where partition $partnum starts."
+    local end_mib=$(( start_mib + new_mib )) _rp_out
+    # Shrink the partition-table entry to match the now-smaller filesystem. parted's
+    # script mode (-s) is SUPPOSED to auto-confirm the "Shrinking a partition can cause
+    # data loss" prompt, but several parted versions abort on it instead — which is the
+    # "Couldn't shrink the partition entry" failure seen in the wild. So if -s fails we
+    # retry the interactive form, feeding "Yes" via ---pretend-input-tty. The filesystem
+    # is ALREADY safely shrunk at this point, so shrinking the table entry to match is
+    # safe. Capture parted's own message so any OTHER cause is reported, not a generic one.
+    if ! _rp_out="$(parted -s "$disk" unit MiB resizepart "$partnum" "${end_mib}MiB" 2>&1)"; then
+        if ! _rp_out="$(printf 'Yes\n' | parted ---pretend-input-tty "$disk" unit MiB resizepart "$partnum" "${end_mib}MiB" 2>&1)"; then
+            printf '%s\n' "$_rp_out" >&2
+            die "Couldn't shrink the partition entry for $part — the filesystem shrank safely, but updating the partition table failed. ($(printf '%s' "$_rp_out" | grep -iE 'error|warn|fail|cannot|unable|overlap|constraint|refus' | tail -n1))"
+        fi
+    fi
+    settle_disk "$disk"
+}
+
+# Create an ext4 partition of GIB GiB inside the largest free region of DISK,
+# format it, mount it at $TARGET, and mount/validate the ESP (EFI). Sets
+# globals NEWPART, ESP, BIOS_DISK.
+create_in_free_space() {
+    local disk="$1" want_gib="$2"
+    local fstart fsize start_mib end_mib before after _try
+    read -r fstart fsize < <(largest_free_region "$disk")
+    # Right after a shrink the freed region can take a moment to surface in
+    # `parted print free`, even with udev settled. Re-probe a few times before
+    # giving up, so a slow disk doesn't trip the guard on a shrink that worked.
+    _try=0
+    while (( fsize < want_gib * 1024 - 512 && _try < 6 )); do
+        sleep 1; settle_disk "$disk"
+        read -r fstart fsize < <(largest_free_region "$disk")
+        _try=$(( _try + 1 ))
+    done
+    (( fsize >= want_gib * 1024 - 512 )) \
+        || die "Free space on $disk shrank unexpectedly (need ${want_gib} GiB, found $(( fsize / 1024 )) GiB)."
+    start_mib="$fstart"
+    end_mib=$(( start_mib + want_gib * 1024 ))
+
+    if is_efi; then
+        ESP="$(find_esp_on "$disk" || true)"
+        [[ -n "$ESP" ]] || die "This machine boots in EFI mode but $disk has no EFI System Partition. Install alongside an existing OS on a disk that has one, or use the whole-disk erase option."
+    fi
+
+    stage partition "Creating a ${want_gib} GiB partition for Outlaw…"
+    before="$(lsblk -nrpo NAME "$disk" | tail -n +2 | sort)"
+    parted -a optimal -s "$disk" mkpart primary ext4 "${start_mib}MiB" "${end_mib}MiB" \
+        || die "Couldn't create the partition (is the partition table full?)."
+    settle_disk "$disk"
+    after="$(lsblk -nrpo NAME "$disk" | tail -n +2 | sort)"
+    NEWPART="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -n1)"
+    if [[ -z "$NEWPART" || ! -b "$NEWPART" ]]; then
+        sleep 1; settle_disk "$disk"
+        after="$(lsblk -nrpo NAME "$disk" | tail -n +2 | sort)"
+        NEWPART="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -n1)"
+    fi
+    [[ -n "$NEWPART" && -b "$NEWPART" ]] || die "Created a partition but couldn't find it. Re-run the installer and try again."
+
+    stage format "Formatting $NEWPART as ext4…"
+    mkfs.ext4 -F "$NEWPART" || die "Formatting failed on $NEWPART."
+    mount "$NEWPART" "$TARGET" || die "Couldn't mount $NEWPART."
+
+    if is_efi; then
+        mkdir -p "$TARGET/boot/efi"
+        mount "$ESP" "$TARGET/boot/efi" || die "Couldn't mount the EFI partition $ESP."
+    else
+        BIOS_DISK="$disk"
+    fi
+}
+
+# Wipe DISK entirely and lay out fresh partitions. Mounts everything at
+# $TARGET. Sets globals ESP / BIOS_DISK / NEWPART.
+wipe_and_partition() {
+    local disk="$1" p1 p2
+    stage partition "Erasing $disk and creating fresh partitions…"
+    if is_efi; then
+        sgdisk --zap-all "$disk" || die "Couldn't clear the old partition table."
+        sgdisk -n1:0:+512M -t1:ef00 -c1:"EFI" "$disk"        || die "Couldn't create the EFI partition."
+        sgdisk -n2:0:0     -t2:8300 -c2:"OutlawRoot" "$disk" || die "Couldn't create the root partition."
+        partprobe "$disk" 2>/dev/null || true; sleep 1
+        p1="$(lsblk -nrpo NAME "$disk" | sed -n 2p)"
+        p2="$(lsblk -nrpo NAME "$disk" | sed -n 3p)"
+        [[ -b "$p1" && -b "$p2" ]] || die "New partitions didn't appear — try again."
+        stage format "Formatting…"
+        mkfs.fat -F32 "$p1" || die "Couldn't format the EFI partition."
+        mkfs.ext4 -F "$p2"  || die "Couldn't format the root partition."
+        mount "$p2" "$TARGET" || die "Couldn't mount the new root."
+        mkdir -p "$TARGET/boot/efi"
+        ESP="$p1"
+        mount "$ESP" "$TARGET/boot/efi" || die "Couldn't mount the EFI partition."
+        NEWPART="$p2"
+    else
+        sgdisk --zap-all "$disk" 2>/dev/null || true
+        parted -s "$disk" mklabel msdos                      || die "Couldn't write a new partition table."
+        parted -s "$disk" mkpart primary ext4 1MiB 100%      || die "Couldn't create the root partition."
+        parted -s "$disk" set 1 boot on                      || true
+        partprobe "$disk" 2>/dev/null || true; sleep 1
+        p1="$(lsblk -nrpo NAME "$disk" | sed -n 2p)"
+        [[ -b "$p1" ]] || die "New partition didn't appear — try again."
+        stage format "Formatting…"
+        mkfs.ext4 -F "$p1" || die "Couldn't format the root partition."
+        mount "$p1" "$TARGET" || die "Couldn't mount the new root."
+        ESP=""
+        BIOS_DISK="$disk"
+        NEWPART="$p1"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Network / mirrors / the big install
+# ---------------------------------------------------------------------------
+
+# Make sure pacstrap will actually be able to download packages. The slim live
+# ISO ships a small default mirrorlist (Arch global CDN first) but no reflector,
+# so we guarantee a usable mirror, init the keyring if empty, check we're online,
+# and refresh the databases — clear, early, fixable messages instead of a
+# mysterious pacstrap failure 20 minutes in.
+NETWORK_READY=0
+prepare_network_and_mirrors() {
+    local ML=/etc/pacman.d/mirrorlist
+    stage network "Checking the internet connection + package mirrors…"
+    if ! grep -qE '^[[:space:]]*Server[[:space:]]*=' "$ML" 2>/dev/null; then
+        ylw "No active mirror found — adding the Arch global CDN."
+        { echo 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch'
+          cat "$ML" 2>/dev/null; } > "$ML.outlaw" && mv "$ML.outlaw" "$ML"
+    fi
+    if [[ ! -s /etc/pacman.d/gnupg/pubring.gpg ]]; then
+        ylw "Initialising package-signing keys…"
+        pacman-key --init >/dev/null 2>&1 || true
+        pacman-key --populate archlinux >/dev/null 2>&1 || true
+    fi
+    if ! curl -fsS --max-time 15 -o /dev/null "https://geo.mirror.pkgbuild.com/lastsync" 2>/dev/null; then
+        if [[ "$AUTO_MODE" = 1 ]]; then
+            die "No internet connection. Connect to Wi-Fi or plug in Ethernet, then try again."
+        fi
+        ylw "WARNING: couldn't reach the Arch package servers."
+        echo "  Installing needs an internet connection."
+        echo "  Connect now with:  nmtui   (choose Wi-Fi or Ethernet), confirm you"
+        echo "  can reach the internet, then continue."
+        confirm_word "CONTINUE" || die "No network — cancelled. Connect, then re-run: sudo outlaw-install"
+    fi
+    pacman -Syy --noconfirm >/dev/null 2>&1 || pacman -Syy --noconfirm || \
+        ylw "Database refresh hit a snag — pacstrap will retry mirrors as it installs."
+    NETWORK_READY=1
+}
+
+pacstrap_and_configure() {
+    local rootdev="$1"
+    [[ "$NETWORK_READY" = 1 ]] || prepare_network_and_mirrors
+    echo
+    grn "All questions are done — the install now runs UNATTENDED."
+    echo "Downloading + installing takes roughly 10–40 minutes depending on your"
+    echo "connection. No input is needed (you don't have to press anything)."
+    echo
+    stage pacstrap "Installing the base system (the long part — grab a drink)…"
+    if ! pacstrap -K "$TARGET" "${PKGS[@]}"; then
+        red "pacstrap failed — the base system did not install."
+        echo "  Almost always this is a network / mirror problem:"
+        echo "   • Connect to the internet:   nmtui   (Wi-Fi or Ethernet)"
+        echo "   • Then run again:            sudo outlaw-install"
+        echo "  The Arch global CDN is already first in /etc/pacman.d/mirrorlist,"
+        echo "  so a single slow mirror shouldn't stop you — just retry."
+        die "Install aborted (no changes beyond the new partition)."
+    fi
+
+    stage configure "Configuring the new system…"
+    genfstab -U "$TARGET" >> "$TARGET/etc/fstab"
+
+    # Carry our working mirrorlist into the installed system. pacstrap installs a
+    # fresh `pacman-mirrorlist` whose /etc/pacman.d/mirrorlist is ALL COMMENTED,
+    # so without this the installed system's pacman (Apps panel, updates) would
+    # fail to connect just like the live ISO did before this fix.
+    if [[ -s /etc/pacman.d/mirrorlist ]]; then
+        cp -f /etc/pacman.d/mirrorlist "$TARGET/etc/pacman.d/mirrorlist" 2>/dev/null || true
+    fi
+
+    # Passwordless Outlaw helpers for the operator (polkit rule) — so ordinary
+    # app installs don't prompt every time. The shell still gates IMPORTANT
+    # installs with the PIN. Single source: copied from the live image.
+    if [[ -f /etc/polkit-1/rules.d/49-outlaw.rules ]]; then
+        install -Dm644 /etc/polkit-1/rules.d/49-outlaw.rules \
+            "$TARGET/etc/polkit-1/rules.d/49-outlaw.rules"
+    fi
+
+    # Bring the shell + helper tools into the installed system.
+    mkdir -p "$TARGET/usr/share/outlaw-os"
+    cp -rT /usr/share/outlaw-os "$TARGET/usr/share/outlaw-os" 2>/dev/null || true
+    rm -rf "$TARGET/usr/share/outlaw-os/node_modules" 2>/dev/null || true
+
+    # Greeter Electron app + Outlaw CodeMaker bundle (both baked into the live
+    # ISO by build.sh). Either may be absent if the build skipped them; the
+    # launcher scripts handle missing-bundle gracefully.
+    if [[ -d /usr/share/outlaw-greeter ]]; then
+        mkdir -p "$TARGET/usr/share/outlaw-greeter"
+        cp -rT /usr/share/outlaw-greeter "$TARGET/usr/share/outlaw-greeter"
+    fi
+    if [[ -d /opt/outlaw-codemaker ]]; then
+        mkdir -p "$TARGET/opt/outlaw-codemaker"
+        cp -rT /opt/outlaw-codemaker "$TARGET/opt/outlaw-codemaker"
+    fi
+
+    # GUI installer app — copy it too so --uninstall / reinstall works offline.
+    if [[ -d /usr/share/outlaw-installer-gui ]]; then
+        mkdir -p "$TARGET/usr/share/outlaw-installer-gui"
+        cp -rT /usr/share/outlaw-installer-gui "$TARGET/usr/share/outlaw-installer-gui"
+    fi
+
+    # Copy EVERY outlaw-* helper from the live image into the installed system.
+    # Using a glob (not a hardcoded list) means new helpers added to the ISO —
+    # outlaw-electron-flags, outlaw-firstboot, outlaw-start-session,
+    # outlaw-install-aur, etc. — are picked up automatically. A stale hardcoded
+    # list here previously dropped the VM GPU-flag helper from installs, which
+    # left the installed system black-screening even after the live ISO worked.
+    shopt -s nullglob
+    for helper in /usr/local/bin/outlaw-*; do
+        [[ -f "$helper" ]] || continue
+        install -Dm755 "$helper" "$TARGET/usr/local/bin/$(basename "$helper")"
+    done
+    shopt -u nullglob
+
+    # First-boot wizard Electron app (separate from the shell). Copy if the
+    # live image carries it.
+    if [[ -d /usr/share/outlaw-firstboot ]]; then
+        mkdir -p "$TARGET/usr/share/outlaw-firstboot"
+        cp -rT /usr/share/outlaw-firstboot "$TARGET/usr/share/outlaw-firstboot"
+        rm -rf "$TARGET/usr/share/outlaw-firstboot/node_modules" 2>/dev/null || true
+    fi
+
+    # Propagate /etc/skel from the live system so new accounts inherit Outlaw's
+    # .bash_profile + .xinitrc (boot routing) and ~/.config/systemd/user/
+    # (SC4 scheduled diagnostic timers, disabled by default). pacstrap pulls in
+    # an Arch-base /etc/skel that lacks all of these; we layer our overrides on
+    # top, preserving any base files we don't override.
+    if [[ -d /etc/skel ]]; then
+        mkdir -p "$TARGET/etc/skel"
+        cp -rT /etc/skel "$TARGET/etc/skel" 2>/dev/null || true
+    fi
+
+    # Credentials were collected up-front (ask_username/ask_password or the
+    # GUI) so the long pacstrap above could run unattended; PW is consumed below.
+
+    # For BIOS, GRUB is written to the parent disk's MBR (never a partition).
+    local BOOT_TARGET="${BIOS_DISK:-}"
+    if [[ -z "$BOOT_TARGET" ]]; then
+        BOOT_TARGET="/dev/$(lsblk -nro PKNAME "$rootdev" | head -n1)"
+    fi
+
+    # Detect the timezone over the network (the live env is online here) so the
+    # installed clock shows LOCAL time, not UTC. Falls back to UTC if offline or
+    # the result isn't a real zone. systemd-timesyncd (enabled below) then keeps
+    # the clock accurate over NTP.
+    local TZ
+    TZ="$(curl -fsS --max-time 6 'http://ip-api.com/line?fields=timezone' 2>/dev/null | tr -d '[:space:]')"
+    [[ -n "$TZ" && -f "/usr/share/zoneinfo/$TZ" ]] || TZ="UTC"
+    grn "Timezone: $TZ (clock will sync over the internet via NTP)"
+
+    stage bootloader "Setting up accounts + boot menu…"
+    cat > "$TARGET/root/outlaw-chroot.sh" <<CHROOT
+#!/usr/bin/env bash
+set -e
+AUTO=$AUTO_MODE
+ln -sf /usr/share/zoneinfo/$TZ /etc/localtime
+hwclock --systohc || true
+sed -i 's/^#\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen
+locale-gen
+echo 'LANG=en_US.UTF-8' > /etc/locale.conf
+echo 'outlaw' > /etc/hostname
+cat > /etc/hosts <<HOSTS
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   outlaw.localdomain outlaw
+HOSTS
+
+# Operator account (member of wheel; sudo requires the password — no NOPASSWD).
+useradd -m -G wheel,video,audio,input,storage,network -s /bin/bash "$USERNAME"
+install -d /etc/sudoers.d
+echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel
+chmod 440 /etc/sudoers.d/10-wheel
+
+# Autologin the operator on tty1 (their .bash_profile then starts the shell).
+install -d /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<GETTY
+[Service]
+ExecStart=
+ExecStart=-/usr/bin/agetty --autologin $USERNAME --noclear %I 38400 linux
+GETTY
+
+systemctl enable NetworkManager apparmor
+# Bluetooth stack — the bluetooth.service must be enabled for adapters to work +
+# for blueman/bluetoothctl to see them. Guarded so a missing unit can't abort.
+systemctl enable bluetooth 2>/dev/null || true
+# Keep the clock correct automatically over the internet (NTP).
+systemctl enable systemd-timesyncd
+# Local AI runtime for the desktop's built-in AI (Phase 13.2). Light daemon — it
+# loads NO model until the desktop shell asks, so the Dev session (its own
+# backend) is unaffected. Guarded so a missing unit can't abort the install.
+systemctl enable ollama 2>/dev/null || true
+
+# Cap the systemd stop timeout so a slow-to-exit graphical session can't hang
+# shutdown/reboot for ~90s ("a stop job is running…" / watchdog messages).
+mkdir -p /etc/systemd/system.conf.d
+cat > /etc/systemd/system.conf.d/10-outlaw-timeout.conf <<TIMEOUT
+[Manager]
+DefaultTimeoutStopSec=15s
+TIMEOUT
+
+# Enable the multilib repo so Steam and the 32-bit gaming libraries can install
+# (the first-boot wizard's Steam bundle + the Apps panel both need it). Arch
+# ships /etc/pacman.conf with [multilib] commented out — uncomment the header
+# and its Include line.
+sed -i '/^#\[multilib\]/{s/^#//; n; s/^#//}' /etc/pacman.conf
+
+# AI is provided by LM Studio (a user-installed desktop app, not a systemd
+# service). The shell talks to it on 127.0.0.1:1234 only when the user toggles
+# the AI on. Nothing to enable/disable here.
+
+# GRUB with OTHER-OS detection enabled (powers dual boot + hotswap).
+sed -i 's/^#\?GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
+grep -q GRUB_DISABLE_OS_PROBER /etc/default/grub || echo 'GRUB_DISABLE_OS_PROBER=false' >> /etc/default/grub
+sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
+grep -q '^GRUB_SAVEDEFAULT' /etc/default/grub || echo 'GRUB_SAVEDEFAULT=true' >> /etc/default/grub
+
+if [[ -d /sys/firmware/efi/efivars ]]; then
+    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=OutlawOS --recheck
+else
+    grub-install --target=i386-pc --recheck "$BOOT_TARGET"
+fi
+grub-mkconfig -o /boot/grub/grub.cfg
+mkinitcpio -P
+
+# --- Outlaw CodeMaker venv (Dev session runtime) ---------------------------
+# CodeMaker source was copied to /opt/outlaw-codemaker before the chroot. If
+# the bundle is present we create a venv and install its pinned Linux deps so
+# the launcher (/usr/local/bin/outlaw-codemaker) finds .venv/bin/python on the
+# first Dev session and starts cleanly. Skip on failure — the launcher's
+# fallback opens the desktop shell with a notification.
+if [[ -f /opt/outlaw-codemaker/main.py ]]; then
+    [[ \$AUTO = 1 ]] && echo "@@STAGE devenv Installing the Dev session (Outlaw CodeMaker)…"
+    REQS=/opt/outlaw-codemaker/requirements-linux.txt
+    [[ -f "\$REQS" ]] || REQS=/opt/outlaw-codemaker/requirements.txt
+    if [[ -f "\$REQS" ]]; then
+        echo "Provisioning Outlaw CodeMaker venv at /opt/outlaw-codemaker/.venv (this may take a few minutes)…"
+        python -m venv /opt/outlaw-codemaker/.venv || true
+        /opt/outlaw-codemaker/.venv/bin/pip install --upgrade pip || true
+        /opt/outlaw-codemaker/.venv/bin/pip install --no-cache-dir -r "\$REQS" \
+            || echo "WARNING: some Outlaw CodeMaker dependencies failed to install — Dev session may degrade."
+    fi
+fi
+CHROOT
+
+    # Display: the installed system uses the standard kernel mode-setting path
+    # (modesetting Xorg driver over vmwgfx / vboxvideo / a real GPU), with
+    # xf86-video-vesa and -fbdev installed as automatic fallbacks. We do NOT
+    # force `nomodeset` or the fbdev driver here: that was a workaround for a
+    # black screen we later traced to the live root shell (now fixed), and it
+    # actually broke X in BIOS mode ("no screens found", no framebuffer).
+
+    chmod +x "$TARGET/root/outlaw-chroot.sh"
+    arch-chroot "$TARGET" /root/outlaw-chroot.sh || die "Configuration failed."
+    rm -f "$TARGET/root/outlaw-chroot.sh"
+
+    # Set passwords via stdin so they are never written to a file or argv.
+    printf '%s:%s\n' "$USERNAME" "$PW" | arch-chroot "$TARGET" chpasswd
+    printf 'root:%s\n' "$PW"           | arch-chroot "$TARGET" chpasswd
+    unset PW
+
+    emit "DONE install complete"
+    echo
+    hr
+    grn "✅ Outlaw OS installed successfully."
+    hr
+    echo "Next steps:"
+    echo "  1. Remove the USB / detach the ISO."
+    echo "  2. Reboot — pick 'Outlaw OS' in the boot menu (your other operating"
+    echo "     systems are still there too)."
+    echo "  3. On first boot, the setup wizard offers Steam / Firefox / Godot."
+    echo "Switch OSes any time with the HOTSWAP button or 'outlaw-hotswap'."
+    echo
+    if [[ "$AUTO_MODE" != 1 ]]; then
+        pause_enter
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# GUI-driven machine modes (password arrives on stdin line 1; after reading it
+# we cut stdin off so no later tool can swallow input)
+# ---------------------------------------------------------------------------
+read_pw_stdin() {
+    IFS= read -r PW || die "No password received."
+    [[ -n "$PW" ]] || die "Empty password received."
+    exec </dev/null
+}
+
+check_user_arg() {
+    USERNAME="$1"
+    [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "Invalid username '$USERNAME'."
+}
+
+# All auto modes verify the network FIRST — never touch a disk and then fail
+# on a missing connection.
+auto_wipe() {   # DISK USER
+    local disk="$1"; check_user_arg "$2"; read_pw_stdin
+    [[ -b "$disk" ]] || die "Not a disk: $disk"
+    [[ "$disk" == "$(live_usb_disk || true)" ]] && die "That's the live USB you're running from — pick another disk."
+    prepare_network_and_mirrors
+    wipe_and_partition "$disk"
+    pacstrap_and_configure "$NEWPART"
+}
+
+auto_free() {   # DISK GIB USER
+    local disk="$1" gib="$2"; check_user_arg "$3"; read_pw_stdin
+    [[ -b "$disk" ]] || die "Not a disk: $disk"
+    [[ "$gib" =~ ^[0-9]+$ ]] && (( gib >= 8 )) || die "Size must be at least 8 GiB."
+    [[ "$disk" == "$(live_usb_disk || true)" ]] && die "That's the live USB you're running from — pick another disk."
+    prepare_network_and_mirrors
+    create_in_free_space "$disk" "$gib"
+    pacstrap_and_configure "$NEWPART"
+}
+
+auto_shrink() { # PART TAKE_GIB USER
+    local part="$1" take="$2"; check_user_arg "$3"; read_pw_stdin
+    [[ -b "$part" ]] || die "Not a partition: $part"
+    [[ "$take" =~ ^[0-9]+$ ]] && (( take >= 8 )) || die "Size must be at least 8 GiB."
+    local disk; disk="/dev/$(lsblk -nro PKNAME "$part" | head -n1)"
+    [[ "$disk" == "$(live_usb_disk || true)" ]] && die "That partition is on the live USB you're running from."
+    prepare_network_and_mirrors
+    shrink_partition "$part" "$take"
+    create_in_free_space "$disk" "$take"
+    pacstrap_and_configure "$NEWPART"
+}
+
+# ---------------------------------------------------------------------------
+# Interactive (terminal) flows — simple: alongside OR erase.
+# ---------------------------------------------------------------------------
+terminal_alongside() {
+    banner
+    grn "INSTALL ALONGSIDE YOUR OTHER OS (Windows, Linux, …)"
+    echo
+    echo "Nothing on your existing system is deleted. Outlaw goes into free"
+    echo "space on the disk — and if there isn't any, I can make some by"
+    echo "shrinking your biggest partition automatically."
+    local disk; disk="$(pick_from_lsblk 'Which disk should Outlaw live on? (0 cancels)')"
+    if [[ "$disk" == "0" || -z "$disk" ]]; then echo "Cancelled."; return; fi
+    [[ -b "$disk" ]] || { red "Not a disk: $disk"; return; }
+    [[ "$disk" == "$(live_usb_disk || true)" ]] && { red "That's the live USB itself — pick the computer's disk."; return; }
+
+    local fstart fsize free_gib
+    read -r fstart fsize < <(largest_free_region "$disk")
+    free_gib=$(( fsize / 1024 ))
+
+    if (( free_gib >= 8 )); then
+        grn "Found ${free_gib} GiB of free space on $disk."
+        local want
+        fix_tty; flush_stdin
+        while :; do
+            read -rp "How many GiB for Outlaw? [Enter = all ${free_gib}] " want
+            [[ -z "$want" ]] && want="$free_gib"
+            [[ "$want" =~ ^[0-9]+$ ]]    || { ylw "Enter a whole number of GiB."; continue; }
+            (( want >= 8 ))              || { ylw "Outlaw needs at least 8 GiB."; continue; }
+            (( want <= free_gib ))       || { ylw "Only ${free_gib} GiB is free."; continue; }
+            break
+        done
+        ask_username; ask_password
+        confirm_word "INSTALL" || { echo "Cancelled."; return; }
+        create_in_free_space "$disk" "$want"
+        pacstrap_and_configure "$NEWPART"
+        return
+    fi
+
+    ylw "No usable free space on $disk — let's make some by shrinking a partition."
+    echo "Partitions that can give up space:"
+    local part ptype fs psize_b min size_mib can_take n=0
+    local -a cands
+    while read -r part ptype; do
+        [[ "$ptype" == "part" ]] || continue
+        fs="$(blkid -o value -s TYPE "$part" 2>/dev/null || true)"
+        case "$fs" in ntfs|ext4|ext3|ext2) ;; *) continue ;; esac
+        if min="$(partition_min_mib "$part")"; then
+            psize_b="$(blockdev --getsize64 "$part")"
+            size_mib=$(( psize_b / 1024 / 1024 ))
+            can_take=$(( (size_mib - min - 1024) / 1024 ))
+            (( can_take >= 8 )) || continue
+            n=$((n+1)); cands+=("$part $can_take")
+            printf '  %d) %s  (%s, can spare up to %d GiB)\n' "$n" "$part" "$fs" "$can_take"
+        fi
+    done < <(lsblk -nrpo NAME,TYPE "$disk" 2>/dev/null)
+    (( n > 0 )) || { red "No partition on $disk can spare 8+ GiB. (Windows disks must be cleanly shut down — disable Fast Startup.)"; return; }
+
+    local pick take maxtake
+    fix_tty; flush_stdin
+    read -rp "Which one? (1-$n, 0 cancels): " pick
+    [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= n )) || { echo "Cancelled."; return; }
+    set -- ${cands[$((pick-1))]}
+    part="$1"; maxtake="$2"
+    fix_tty; flush_stdin
+    while :; do
+        read -rp "How many GiB should Outlaw take from $part? (8-$maxtake): " take
+        [[ "$take" =~ ^[0-9]+$ ]]   || { ylw "Enter a whole number."; continue; }
+        (( take >= 8 ))             || { ylw "At least 8 GiB."; continue; }
+        (( take <= maxtake ))       || { ylw "At most $maxtake GiB."; continue; }
+        break
+    done
+    ask_username; ask_password
+    red "About to shrink $part by ${take} GiB and install Outlaw in the freed space."
+    ylw "Your files on $part are kept — the partition just gets smaller."
+    confirm_word "SHRINK" || { echo "Cancelled — nothing was changed."; return; }
+    shrink_partition "$part" "$take"
+    create_in_free_space "$disk" "$take"
+    pacstrap_and_configure "$NEWPART"
+}
+
+terminal_erase() {
+    banner
+    red "ERASE A WHOLE DISK — everything on it (Windows, files, everything) is destroyed."
+    local disk; disk="$(pick_from_lsblk 'Disk to ERASE COMPLETELY (0 cancels)')"
+    if [[ "$disk" == "0" || -z "$disk" ]]; then echo "Cancelled."; return; fi
+    [[ -b "$disk" ]] || { red "Not a disk: $disk"; return; }
+    [[ "$disk" == "$(live_usb_disk || true)" ]] && { red "That's the live USB itself — pick the computer's disk."; return; }
+    red "You are about to DESTROY ALL DATA on $disk:"
+    lsblk "$disk"
+    echo
+    confirm_word "$disk" || { echo "Device name did not match. Cancelled."; return; }
+    red "Final confirmation."
+    confirm_word "ERASE" || { echo "Cancelled."; return; }
+    ask_username; ask_password
+    wipe_and_partition "$disk"
+    pacstrap_and_configure "$NEWPART"
+}
+
+# ---------------------------------------------------------------------------
+do_uninstall() {
+    banner
+    ylw "Remove Outlaw OS — your other operating systems and their data stay intact."
+    echo
+    if is_efi && command -v efibootmgr >/dev/null; then
+        echo "Current UEFI boot entries:"
+        efibootmgr | grep -Ei 'outlaw' || echo "  (no Outlaw entry found)"
+        echo
+        fix_tty; flush_stdin
+        read -rp "Remove the OutlawOS UEFI boot entry? [y/N] " a
+        if [[ "$a" =~ ^[Yy]$ ]]; then
+            for n in $(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\?.*[Oo]utlaw.*/\1/p'); do
+                efibootmgr -b "$n" -B && grn "Removed Boot$n."
+            done
+        fi
+    fi
+    echo
+    ylw "Optionally free the partition Outlaw OS lived on (this erases ONLY that partition)."
+    fix_tty; flush_stdin
+    read -rp "Format an Outlaw partition now? [y/N] " a
+    if [[ "$a" =~ ^[Yy]$ ]]; then
+        local p; p="$(pick_from_lsblk 'Outlaw OS root partition to free')"
+        [[ -b "$p" ]] || die "Not a block device: $p"
+        red "This formats ONLY $p. Other partitions are untouched."
+        confirm_word "FORMAT" || { echo "Cancelled."; return; }
+        mkfs.ext4 -F "$p" && grn "Freed $p."
+    fi
+    grn "Done. Reboot and your other OS will start as normal."
+    ylw "Tip: in Windows you can reclaim the freed space with Disk Management."
+}
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+case "${1:-}" in
+    --uninstall)    do_uninstall; exit 0 ;;
+    --probe-extras) probe_extras; exit 0 ;;
+    --auto-wipe)    AUTO_MODE=1; auto_wipe   "${2:?disk}" "${3:?user}"; exit 0 ;;
+    --auto-free)    AUTO_MODE=1; auto_free   "${2:?disk}" "${3:?gib}" "${4:?user}"; exit 0 ;;
+    --auto-shrink)  AUTO_MODE=1; auto_shrink "${2:?part}" "${3:?gib}" "${4:?user}"; exit 0 ;;
+esac
+
+while :; do
+    banner
+    grn "Welcome to the Outlaw OS installer."
+    echo "You're running the live system — nothing is installed yet."
+    echo
+    echo "  1) Install ALONGSIDE my other OS   (keeps Windows/Linux — automatic)"
+    echo "  2) ERASE a whole disk              (Outlaw becomes the only OS)"
+    echo "  3) Open a shell                    (advanced)"
+    echo "  0) Reboot"
+    echo
+    ylw "Tip: there's also a point-and-click installer — on the desktop, press"
+    echo "the 'Install Outlaw OS' button. To remove Outlaw later: outlaw-install --uninstall"
+    echo
+    fix_tty; flush_stdin
+    read -rp "Type a number and press Enter: " main
+    case "$main" in
+        1) terminal_alongside ;;
+        2) terminal_erase ;;
+        3) bash ;;
+        0) systemctl reboot ;;
+        *) ;;
+    esac
+    echo; fix_tty; flush_stdin; read -rp "Press Enter to return to the menu…" _
+done

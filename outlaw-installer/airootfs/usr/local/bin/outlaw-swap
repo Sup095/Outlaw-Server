@@ -1,0 +1,84 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-swap — "use storage as extra memory" (C8). Manages a swapfile so a
+# low-RAM machine can keep an AI model + the desktop alive instead of OOMing.
+# Slower than real RAM, but it works. Fully reversible.
+#
+#   outlaw-swap on [SIZE_GB]   create + enable /swapfile (default 4 GB), persist
+#   outlaw-swap off            disable + remove it, drop the fstab line
+#   outlaw-swap status         print swap_total_mb + whether our swapfile exists
+#
+# Run via `pkexec /usr/local/bin/outlaw-swap …` (passwordless via 49-outlaw).
+# ============================================================================
+set -uo pipefail
+
+ACTION="${1:-status}"
+SIZE_GB="${2:-4}"
+SWAPFILE="/swapfile"
+
+print_status() {
+    local total
+    total="$(free -m 2>/dev/null | awk '/^Swap:/{print $2}')"
+    echo "swap_total_mb=${total:-0}"
+    if [[ -f "$SWAPFILE" ]]; then echo "swapfile=present"; else echo "swapfile=absent"; fi
+}
+
+# Reading status needs no privileges — do it before the root gate so the UI can
+# poll it without an admin prompt.
+if [[ "$ACTION" == "status" ]]; then print_status; exit 0; fi
+
+# on/off mutate the system — require root (one pkexec prompt via 49-outlaw).
+[[ $EUID -eq 0 ]] || exec pkexec "$0" "$@"
+
+case "$ACTION" in
+    on)
+        [[ "$SIZE_GB" =~ ^[0-9]+$ && "$SIZE_GB" -ge 1 && "$SIZE_GB" -le 64 ]] \
+            || { echo "Bad size (use 1–64 GB)."; exit 2; }
+        if [[ -f "$SWAPFILE" ]]; then
+            # Already there — make sure it's actually on, then report.
+            swapon "$SWAPFILE" 2>/dev/null || true
+            echo "Swapfile already exists."; print_status; exit 0
+        fi
+        # Need the requested size + 1 GB headroom free on / so we don't fill the disk.
+        avail_gb="$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9')"
+        avail_gb="${avail_gb:-0}"
+        if (( avail_gb < SIZE_GB + 1 )); then
+            echo "Not enough free disk space (need ${SIZE_GB}G + headroom, have ${avail_gb}G)."
+            exit 3
+        fi
+        echo ">> Creating ${SIZE_GB}G swapfile at $SWAPFILE (this can take a minute)…"
+        # dd writes real zeros — fallocate can leave holes that swapon rejects on
+        # some filesystems, so dd is the portable choice for a swapfile.
+        if ! dd if=/dev/zero of="$SWAPFILE" bs=1M count="$((SIZE_GB * 1024))" status=progress; then
+            rm -f "$SWAPFILE"; echo "Failed to allocate the swapfile."; exit 4
+        fi
+        chmod 600 "$SWAPFILE"
+        mkswap "$SWAPFILE" >/dev/null || { rm -f "$SWAPFILE"; echo "mkswap failed."; exit 5; }
+        swapon "$SWAPFILE" || { rm -f "$SWAPFILE"; echo "swapon failed."; exit 6; }
+        # Persist across reboots. nofail so a missing/odd swapfile can NEVER block
+        # boot. Skip if a line is already there.
+        if ! grep -q '^/swapfile[[:space:]]' /etc/fstab 2>/dev/null; then
+            echo '/swapfile none swap defaults,nofail 0 0' >> /etc/fstab
+        fi
+        echo ">> Done — storage-as-memory enabled."
+        print_status
+        ;;
+    off)
+        if [[ -f "$SWAPFILE" ]]; then
+            swapoff "$SWAPFILE" 2>/dev/null || true
+            # Remove our fstab line (use # as the sed delimiter since the path has /).
+            sed -i '\#^/swapfile[[:space:]]#d' /etc/fstab 2>/dev/null || true
+            rm -f "$SWAPFILE"
+            echo ">> Storage-as-memory disabled."
+        else
+            echo "No swapfile to remove."
+        fi
+        print_status
+        ;;
+    status)
+        print_status
+        ;;
+    *)
+        echo "Usage: outlaw-swap on [GB] | off | status"; exit 1
+        ;;
+esac

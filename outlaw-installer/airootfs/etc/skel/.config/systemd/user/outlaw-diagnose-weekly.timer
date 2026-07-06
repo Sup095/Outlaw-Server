@@ -1,0 +1,18 @@
+# ============================================================================
+# Outlaw OS — weekly standard diagnostic
+# Runs every Saturday at 04:00 local time. Tied to outlaw-diagnose@standard.service.
+# Disabled by default; user opts in from System Core → Diagnostics → Schedule.
+# ============================================================================
+
+[Unit]
+Description=Outlaw OS weekly standard diagnostic
+Documentation=man:outlaw-diagnose(1)
+
+[Timer]
+OnCalendar=Sat *-*-* 04:00:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=outlaw-diagnose@standard.service
+
+[Install]
+WantedBy=timers.target

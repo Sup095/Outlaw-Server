@@ -1,0 +1,73 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-codemaker — launch the Outlaw CodeMaker AI game-dev agent.
+# ----------------------------------------------------------------------------
+# Tries a few well-known install locations:
+#   /opt/outlaw-codemaker            (system-wide install)
+#   ~/.local/share/outlaw-codemaker  (per-user install)
+#   $OUTLAW_CODEMAKER_HOME           (explicit override)
+#
+# Each location is expected to contain `main.py` and a Python venv at .venv/.
+# If none are found we drop the user into the desktop shell with a toast-style
+# notice — they can install CodeMaker later without losing their session.
+# ============================================================================
+
+set -u
+
+CANDIDATES=(
+    "${OUTLAW_CODEMAKER_HOME:-}"
+    "$HOME/.local/share/outlaw-codemaker"
+    "/opt/outlaw-codemaker"
+)
+
+CM_HOME=""
+for path in "${CANDIDATES[@]}"; do
+    if [[ -n "$path" && -f "$path/main.py" ]]; then
+        CM_HOME="$path"
+        break
+    fi
+done
+
+if [[ -z "$CM_HOME" ]]; then
+    # CodeMaker isn't installed yet. Don't strand the user on a black screen —
+    # show a one-shot toast (via notify-send if present), reset the session
+    # choice so the greeter shows again on next boot, and hand off to the
+    # desktop shell so they can use Apps / files / browser to install it.
+    MSG="Outlaw CodeMaker isn't installed. Falling back to the desktop. Install at /opt/outlaw-codemaker and re-pick 'Dev session' at the greeter."
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send "Outlaw OS" "$MSG" 2>/dev/null || true
+    fi
+    echo "$MSG" >&2
+    rm -f "$HOME/.outlaw-session" 2>/dev/null || true
+    exec electron /usr/share/outlaw-os
+fi
+
+# Found it. Prefer the venv interpreter; fall back to system python3.
+if [[ -x "$CM_HOME/.venv/bin/python" ]]; then
+    PYBIN="$CM_HOME/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+    PYBIN="$(command -v python3)"
+else
+    echo "outlaw-codemaker: no Python interpreter available." >&2
+    exec electron /usr/share/outlaw-os
+fi
+
+# Verify the GUI toolkit is actually importable BEFORE launching. On the live
+# ISO the venv isn't built yet (it's provisioned during a full install), so
+# system python3 has no PyQt6 — launching anyway crashes on import, and the
+# session watchdog counts that as a crash loop and drops the user to a bare TTY
+# (exactly the failure in the field). Instead, degrade gracefully to the desktop
+# and point at the on-demand Dev-environment setup.
+if ! "$PYBIN" -c 'import PyQt6.QtCore' >/dev/null 2>&1; then
+    MSG="The Dev session isn't set up on this system yet. Falling back to the desktop — open Settings → Session → 'Set up Dev session' to download it (or run outlaw-setup-dev in a terminal)."
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send "Outlaw OS" "$MSG" 2>/dev/null || true
+    fi
+    echo "$MSG" >&2
+    # Reset the saved choice so we don't bounce straight back into Dev next boot.
+    rm -f "$HOME/.outlaw-session" 2>/dev/null || true
+    exec electron /usr/share/outlaw-os
+fi
+
+cd "$CM_HOME"
+exec "$PYBIN" main.py "$@"

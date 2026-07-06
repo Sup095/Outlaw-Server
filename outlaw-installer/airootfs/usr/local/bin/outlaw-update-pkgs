@@ -1,0 +1,32 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-update-pkgs — update ALL system + app packages (full system upgrade).
+# ----------------------------------------------------------------------------
+# Run via `pkexec /usr/local/bin/outlaw-update-pkgs` from the shell's
+# "System Package Updates" panel. On Arch the correct, reliable way to update
+# anything is a FULL upgrade (`pacman -Syu`) — partial upgrades break systems —
+# so this updates everything at once, which also covers every app installed
+# from the Apps panel (they're all pacman packages). Passwordless for the
+# operator via the 49-outlaw polkit rule.
+# ============================================================================
+set -uo pipefail
+
+[[ $EUID -eq 0 ]] || exec pkexec "$0" "$@"
+
+# Make sure signing keys exist (older/fresh installs) before validating sigs.
+if [[ ! -s /etc/pacman.d/gnupg/pubring.gpg ]]; then
+    echo ">> Initialising package-signing keys…"
+    pacman-key --init >/dev/null 2>&1 || true
+    pacman-key --populate archlinux >/dev/null 2>&1 || true
+fi
+
+echo ">> Updating all packages (full system upgrade)…"
+if ! pacman -Syu --noconfirm; then
+    echo "ERROR: the update did not complete."
+    echo "       Usually this is a network problem — connect to the internet"
+    echo "       (Settings → Network & Wi-Fi) and try again."
+    exit 1
+fi
+
+echo ">> Everything is up to date."
+exit 0

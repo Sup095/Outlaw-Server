@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-tune — hardware probe, stress test, and per-machine auto-tuning.
+# ----------------------------------------------------------------------------
+# Phase 5 of the Outlaw roadmap. After install the shell can:
+#   * probe the machine,
+#   * run a short, thermal-watched CPU stress test,
+#   * compute the best settings for THIS hardware, and
+#   * apply them (persistently) to make development smoother.
+#
+# Subcommands:
+#   probe              Print hardware facts as JSON.            (no root)
+#   recommend          Print recommended tuning as JSON.        (no root)
+#   stress [seconds]   Short CPU stress + benchmark (JSON).     (no root)
+#   apply              Apply + persist the recommended tuning.  (ROOT / pkexec)
+#   apply-runtime      Re-apply runtime-only bits (governor).   (ROOT, boot svc)
+#   status             Print the applied profile, if any.       (no root)
+#   reset              Remove all Outlaw tuning.                (ROOT / pkexec)
+#
+# Design: like outlaw-perf, the privileged actions only ever write a fixed,
+# known set of files (a sysctl drop-in, a zram-generator drop-in, a tiny boot
+# service) and toggle the CPU governor through the same allowlisted path. It
+# never executes caller-supplied strings. Everything is reversible via `reset`.
+# ============================================================================
+set -uo pipefail
+
+SYSCTL_FILE="/etc/sysctl.d/99-outlaw-tune.conf"
+ZRAM_FILE="/etc/systemd/zram-generator.conf"
+BOOT_SVC="/etc/systemd/system/outlaw-tune-boot.service"
+PROFILE="/etc/outlaw-tuning.json"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+_need_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo "outlaw-tune: '$1' must run as root (use pkexec)." >&2
+        exit 1
+    fi
+}
+
+# Read an integer from a file, or echo a default.
+_readint() { local f="$1" d="${2:-0}"; if [[ -r "$f" ]]; then tr -cd '0-9' < "$f" 2>/dev/null || echo "$d"; else echo "$d"; fi; }
+
+# ---------------------------------------------------------------------------
+# probe — gather hardware facts (read-only)
+# ---------------------------------------------------------------------------
+probe_cpu_cores() { nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 1; }
+probe_cpu_model() { grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //; s/"//g' || echo "unknown"; }
+probe_ram_mb()    { awk '/MemTotal/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0; }
+probe_swap_mb()   { awk '/SwapTotal/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0; }
+
+probe_root_rotational() {
+    # 1 = spinning HDD, 0 = SSD/NVMe. Best-effort: find the disk backing /.
+    local src dev base rot
+    src="$(findmnt -no SOURCE / 2>/dev/null || echo)"
+    [[ -z "$src" ]] && { echo 0; return; }
+    dev="$(lsblk -no PKNAME "$src" 2>/dev/null | head -n1)"
+    [[ -z "$dev" ]] && dev="$(basename "$src" | sed 's/[0-9]*$//')"
+    base="/sys/block/$dev/queue/rotational"
+    rot="$(_readint "$base" 0)"
+    echo "${rot:-0}"
+}
+
+probe_gpu() {
+    if command -v lspci >/dev/null 2>&1; then
+        lspci 2>/dev/null | grep -iE 'vga|3d|display' | head -n1 | sed 's/.*: //; s/"//g' || echo "unknown"
+    else
+        echo "unknown"
+    fi
+}
+
+probe_vram_mb() {
+    # NVIDIA via nvidia-smi; otherwise unknown (-1).
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -cd '0-9' || echo -1
+    else
+        echo -1
+    fi
+}
+
+probe_is_vm() {
+    if command -v systemd-detect-virt >/dev/null 2>&1; then
+        local v; v="$(systemd-detect-virt 2>/dev/null || echo none)"
+        [[ "$v" != "none" && -n "$v" ]] && echo "$v" || echo none
+    else
+        echo none
+    fi
+}
+
+probe_is_laptop() { compgen -G "/sys/class/power_supply/BAT*" >/dev/null 2>&1 && echo 1 || echo 0; }
+
+probe_temp_c() {
+    # Highest current thermal-zone temperature in whole degrees C, or -1.
+    local hi=-1 t v
+    for t in /sys/class/thermal/thermal_zone*/temp; do
+        [[ -r "$t" ]] || continue
+        v="$(_readint "$t" 0)"; v=$(( v / 1000 ))
+        (( v > hi )) && hi=$v
+    done
+    echo "$hi"
+}
+
+cmd_probe() {
+    local cores ram swap rot gpu vram vm lap temp model
+    cores="$(probe_cpu_cores)"; model="$(probe_cpu_model)"
+    ram="$(probe_ram_mb)"; swap="$(probe_swap_mb)"
+    rot="$(probe_root_rotational)"; gpu="$(probe_gpu)"; vram="$(probe_vram_mb)"
+    vm="$(probe_is_vm)"; lap="$(probe_is_laptop)"; temp="$(probe_temp_c)"
+    # Hand-rolled JSON (no jq dependency). Strings are simple/known-safe but we
+    # still escape double quotes defensively.
+    model="${model//\"/\'}"; gpu="${gpu//\"/\'}"
+    cat <<JSON
+{
+  "cpu_model": "${model}",
+  "cpu_cores": ${cores:-1},
+  "ram_mb": ${ram:-0},
+  "swap_mb": ${swap:-0},
+  "root_rotational": ${rot:-0},
+  "gpu": "${gpu}",
+  "vram_mb": ${vram:--1},
+  "virt": "${vm}",
+  "is_laptop": ${lap:-0},
+  "temp_c": ${temp:--1}
+}
+JSON
+}
+
+# ---------------------------------------------------------------------------
+# recommend — compute tuning from the probe (read-only)
+# ---------------------------------------------------------------------------
+# Echoes shell-style KEY=VALUE lines so apply() can source them, plus a JSON
+# form for the UI when called as `recommend json`.
+_compute() {
+    RAM_MB="$(probe_ram_mb)"; SWAP_MB="$(probe_swap_mb)"
+    ROT="$(probe_root_rotational)"; LAP="$(probe_is_laptop)"; VM="$(probe_is_vm)"
+
+    # swappiness: low for SSD (don't thrash flash), moderate for HDD.
+    if [[ "$ROT" == "1" ]]; then SWAPPINESS=30; else SWAPPINESS=10; fi
+
+    # Dev-friendly kernel limits (file watchers + mmap count for Godot/Electron/
+    # Steam-Proton). Safe, widely-recommended values.
+    INOTIFY_WATCHES=524288
+    INOTIFY_INSTANCES=1024
+    MAX_MAP_COUNT=1048576
+
+    # CPU governor: performance on desktops/VMs for snappy builds; on battery
+    # laptops prefer schedutil to not torch battery life.
+    if [[ "$LAP" == "1" ]]; then GOVERNOR=schedutil; else GOVERNOR=performance; fi
+
+    # zram: enable a compressed RAM swap on low-memory machines (<= 8 GB) that
+    # don't already have a big swap. Size = half RAM, capped at 8 GB.
+    ZRAM_MB=0
+    if (( RAM_MB > 0 && RAM_MB <= 8192 && SWAP_MB < 2048 )); then
+        ZRAM_MB=$(( RAM_MB / 2 ))
+        (( ZRAM_MB > 8192 )) && ZRAM_MB=8192
+    fi
+
+    # Suggested CodeMaker VRAM mode (the shell maps this to its setting).
+    local vram; vram="$(probe_vram_mb)"
+    if   (( vram < 0 ));      then VRAM_MODE=auto
+    elif (( vram >= 8192 ));  then VRAM_MODE=off
+    elif (( vram >= 4096 ));  then VRAM_MODE=lean
+    else                          VRAM_MODE=minimal
+    fi
+}
+
+cmd_recommend() {
+    _compute
+    if [[ "${1:-}" == "json" ]]; then
+        cat <<JSON
+{
+  "swappiness": ${SWAPPINESS},
+  "inotify_watches": ${INOTIFY_WATCHES},
+  "inotify_instances": ${INOTIFY_INSTANCES},
+  "max_map_count": ${MAX_MAP_COUNT},
+  "governor": "${GOVERNOR}",
+  "zram_mb": ${ZRAM_MB},
+  "vram_mode": "${VRAM_MODE}"
+}
+JSON
+    else
+        cat <<EOF
+SWAPPINESS=${SWAPPINESS}
+INOTIFY_WATCHES=${INOTIFY_WATCHES}
+INOTIFY_INSTANCES=${INOTIFY_INSTANCES}
+MAX_MAP_COUNT=${MAX_MAP_COUNT}
+GOVERNOR=${GOVERNOR}
+ZRAM_MB=${ZRAM_MB}
+VRAM_MODE=${VRAM_MODE}
+EOF
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# stress — short, thermal-watched CPU stress + rough benchmark (no root)
+# ---------------------------------------------------------------------------
+cmd_stress() {
+    local secs="${1:-10}"
+    # Clamp to a safe range so this can never run away.
+    [[ "$secs" =~ ^[0-9]+$ ]] || secs=10
+    (( secs < 3 ))  && secs=3
+    (( secs > 30 )) && secs=30
+
+    local cores temp_before temp_peak score
+    cores="$(probe_cpu_cores)"
+    temp_before="$(probe_temp_c)"
+    temp_peak="$temp_before"
+
+    # Single-core benchmark: count integer ops we can do in 1 second → score.
+    # Pure bash arithmetic, no external benchmark dependency.
+    local start now ops=0
+    start="$(date +%s%N)"
+    while :; do
+        : $(( ops++ * 7 % 1000003 ))
+        (( ops % 20000 == 0 )) || continue
+        now="$(date +%s%N)"
+        (( (now - start) >= 1000000000 )) && break
+    done
+    score=$(( ops / 1000 ))   # k-ops/sec, relative
+
+    # All-core stress for the requested duration, sampling temperature.
+    local pids=() i
+    for (( i=0; i<cores; i++ )); do
+        ( end=$(( $(date +%s) + secs )); while (( $(date +%s) < end )); do : $(( 13 * 17 % 7 )); done ) &
+        pids+=("$!")
+    done
+    # Sample temp while the burners run.
+    local elapsed=0 t
+    while (( elapsed < secs )); do
+        sleep 1; elapsed=$(( elapsed + 1 ))
+        t="$(probe_temp_c)"; (( t > temp_peak )) && temp_peak=$t
+    done
+    for i in "${pids[@]}"; do wait "$i" 2>/dev/null || true; done
+    t="$(probe_temp_c)"; (( t > temp_peak )) && temp_peak=$t
+
+    local thermal_ok=1
+    (( temp_peak >= 95 )) && thermal_ok=0
+
+    cat <<JSON
+{
+  "cores_stressed": ${cores},
+  "seconds": ${secs},
+  "score_kops": ${score},
+  "temp_before_c": ${temp_before},
+  "temp_peak_c": ${temp_peak},
+  "thermal_ok": ${thermal_ok}
+}
+JSON
+}
+
+# ---------------------------------------------------------------------------
+# apply — write + activate the recommended tuning (ROOT)
+# ---------------------------------------------------------------------------
+cmd_apply() {
+    _need_root apply
+    _compute
+
+    # 1) sysctl drop-in (persists across reboots; applied now via sysctl).
+    cat > "$SYSCTL_FILE" <<EOF
+# Generated by outlaw-tune. Remove with: outlaw-tune reset
+vm.swappiness = ${SWAPPINESS}
+vm.max_map_count = ${MAX_MAP_COUNT}
+fs.inotify.max_user_watches = ${INOTIFY_WATCHES}
+fs.inotify.max_user_instances = ${INOTIFY_INSTANCES}
+EOF
+    sysctl --system >/dev/null 2>&1 || true
+
+    # 2) zram (only if recommended + zram-generator is available).
+    if (( ZRAM_MB > 0 )); then
+        if command -v systemctl >/dev/null 2>&1 && \
+           ( command -v zramctl >/dev/null 2>&1 || systemctl list-unit-files 2>/dev/null | grep -q 'systemd-zram-setup' || true ); then
+            cat > "$ZRAM_FILE" <<EOF
+# Generated by outlaw-tune. Remove with: outlaw-tune reset
+[zram0]
+zram-size = ${ZRAM_MB}
+compression-algorithm = zstd
+EOF
+            systemctl daemon-reload 2>/dev/null || true
+            systemctl start /dev/zram0 2>/dev/null || \
+                systemctl restart systemd-zram-setup@zram0.service 2>/dev/null || true
+        fi
+    else
+        rm -f "$ZRAM_FILE" 2>/dev/null || true
+    fi
+
+    # 3) CPU governor now + a boot service to re-apply it each boot.
+    _apply_governor "$GOVERNOR"
+    cat > "$BOOT_SVC" <<EOF
+[Unit]
+Description=Outlaw OS per-machine tuning (runtime bits)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/outlaw-tune apply-runtime
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable outlaw-tune-boot.service >/dev/null 2>&1 || true
+
+    # 4) Save the applied profile for status display + idempotency.
+    cat > "$PROFILE" <<JSON
+{
+  "applied_at": "$(date -Iseconds 2>/dev/null || date)",
+  "swappiness": ${SWAPPINESS},
+  "max_map_count": ${MAX_MAP_COUNT},
+  "inotify_watches": ${INOTIFY_WATCHES},
+  "inotify_instances": ${INOTIFY_INSTANCES},
+  "governor": "${GOVERNOR}",
+  "zram_mb": ${ZRAM_MB},
+  "vram_mode": "${VRAM_MODE}"
+}
+JSON
+
+    echo "outlaw-tune: applied (governor=${GOVERNOR}, swappiness=${SWAPPINESS}, zram=${ZRAM_MB}MB, vram_mode=${VRAM_MODE})."
+    # Echo the recommended VRAM mode on a parseable line so the shell can mirror
+    # it into its own setting if it wants.
+    echo "OUTLAW_VRAM_MODE=${VRAM_MODE}"
+}
+
+_apply_governor() {
+    local gov="$1" c avail count=0
+    case "$gov" in performance|schedutil|powersave|ondemand|conservative) ;; *) return 0 ;; esac
+    for c in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        [[ -w "$c" ]] || continue
+        avail="$(dirname "$c")/scaling_available_governors"
+        if [[ -r "$avail" ]] && grep -qw "$gov" "$avail"; then
+            echo "$gov" > "$c" && count=$(( count + 1 ))
+        fi
+    done
+    return 0
+}
+
+cmd_apply_runtime() {
+    _need_root apply-runtime
+    [[ -r "$PROFILE" ]] || exit 0
+    local gov
+    gov="$(sed -n 's/.*"governor"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PROFILE" | head -n1)"
+    [[ -n "$gov" ]] && _apply_governor "$gov"
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# status / reset
+# ---------------------------------------------------------------------------
+cmd_status() {
+    if [[ -r "$PROFILE" ]]; then cat "$PROFILE"; else echo '{"applied": false}'; fi
+}
+
+cmd_reset() {
+    _need_root reset
+    rm -f "$SYSCTL_FILE" "$ZRAM_FILE" "$PROFILE" 2>/dev/null || true
+    sysctl --system >/dev/null 2>&1 || true
+    if [[ -f "$BOOT_SVC" ]]; then
+        systemctl disable outlaw-tune-boot.service >/dev/null 2>&1 || true
+        rm -f "$BOOT_SVC"
+        systemctl daemon-reload 2>/dev/null || true
+    fi
+    systemctl stop /dev/zram0 2>/dev/null || true
+    _apply_governor schedutil
+    echo "outlaw-tune: all Outlaw tuning removed; governor reset to schedutil."
+}
+
+# ---------------------------------------------------------------------------
+case "${1:-}" in
+    probe)         cmd_probe ;;
+    recommend)     cmd_recommend "${2:-}" ;;
+    stress)        cmd_stress "${2:-10}" ;;
+    apply)         cmd_apply ;;
+    apply-runtime) cmd_apply_runtime ;;
+    status)        cmd_status ;;
+    reset)         cmd_reset ;;
+    *) echo "usage: outlaw-tune {probe|recommend [json]|stress [secs]|apply|apply-runtime|status|reset}" >&2; exit 2 ;;
+esac

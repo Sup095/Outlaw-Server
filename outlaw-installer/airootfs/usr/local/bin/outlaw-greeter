@@ -1,0 +1,37 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-greeter — launches the Electron session greeter.
+# ----------------------------------------------------------------------------
+# Called from ~/.xinitrc as the first X window. The greeter writes the user's
+# choice to ~/.outlaw-session and then exits; .xinitrc reads the file and
+# execs the appropriate session (outlaw-codemaker for "dev", electron
+# /usr/share/outlaw-os for "desktop", or nothing for "tty").
+#
+# Environment overrides:
+#   OUTLAW_SKIP_GREETER=1   skip and use the previous choice (or "desktop")
+#   OUTLAW_GREETER_PATH     override the Electron app directory
+# ============================================================================
+
+set -u
+
+if [[ "${OUTLAW_SKIP_GREETER:-0}" == "1" ]]; then
+    exit 0
+fi
+
+GREETER_DIR="${OUTLAW_GREETER_PATH:-/usr/share/outlaw-greeter}"
+
+if [[ ! -f "$GREETER_DIR/main.js" ]]; then
+    # Greeter app is missing — log it and let .xinitrc fall back to desktop.
+    echo "outlaw-greeter: $GREETER_DIR/main.js not found — defaulting to desktop." >&2
+    echo "desktop" > "$HOME/.outlaw-session"
+    exit 0
+fi
+
+# Electron CLI flags come from outlaw-electron-flags, which always emits
+# --no-sandbox and (when running in a VM with no 3D acceleration) adds
+# --disable-gpu --disable-gpu-compositing. The latter prevents the silent
+# black-screen-with-cursor failure mode on VirtualBox / QEMU with 3D off.
+# Run synchronously — .xinitrc waits for the greeter to exit before reading
+# the session file.
+mapfile -t ELECTRON_FLAGS < <(outlaw-electron-flags 2>/dev/null || echo "--no-sandbox")
+exec electron "${ELECTRON_FLAGS[@]}" "$GREETER_DIR"

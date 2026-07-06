@@ -1,0 +1,102 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-driver-profile — install/remove the USERSPACE graphics stack for a
+# session profile (gaming/desktop vs lean/dev).
+# ----------------------------------------------------------------------------
+# SAFETY (this is the highest-risk feature, so it is deliberately narrow):
+#   * Post-boot, USERSPACE ONLY — Vulkan ICDs, Mesa, the 32-bit gaming libs and
+#     GameMode/MangoHUD. It NEVER installs kernel modules, the NVIDIA *kernel*
+#     driver, DKMS, or anything that writes the initramfs / KMS / bootloader.
+#     So it CANNOT change whether the machine boots.
+#   * Fully revertible: `revert` removes only the gaming extras and keeps the
+#     harmless Vulkan/Mesa libs, so an installed Steam/Proton never breaks.
+#   * Fixed package lists — no user input is ever interpolated into pacman.
+#
+# Subcommands:
+#   detect            → JSON {vendor, gaming_installed}        (read-only)
+#   packages          → space-separated package list for preview (read-only)
+#   apply [gaming]    → install the gaming/desktop graphics stack (root)
+#   revert            → remove the gaming extras (root)
+# ============================================================================
+set -uo pipefail
+
+gpu_vendor() {
+    local s
+    s="$(lspci 2>/dev/null | grep -Ei 'vga|3d|display' | head -n1 || true)"
+    if   printf '%s' "$s" | grep -qiE 'nvidia';         then echo nvidia
+    elif printf '%s' "$s" | grep -qiE 'amd|ati|radeon'; then echo amd
+    elif printf '%s' "$s" | grep -qiE 'intel';          then echo intel
+    else echo unknown; fi
+}
+
+# Userspace graphics packages for the gaming/desktop profile (vendor-aware).
+gaming_pkgs() {
+    local base="mesa lib32-mesa vulkan-icd-loader lib32-vulkan-icd-loader"
+    local vendor=""
+    case "$1" in
+        amd)    vendor="vulkan-radeon lib32-vulkan-radeon" ;;
+        intel)  vendor="vulkan-intel lib32-vulkan-intel" ;;
+        nvidia) vendor="nvidia-utils lib32-nvidia-utils" ;;   # USERSPACE libs only
+    esac
+    echo "$base $vendor gamemode lib32-gamemode mangohud"
+}
+
+prep_pacman() {
+    # Enable [multilib] (32-bit libs live there; Arch ships it off), init the
+    # keyring if empty, and force a full DB refresh — same as outlaw-pkg-install.
+    if ! grep -qE '^\[multilib\]' /etc/pacman.conf; then
+        sed -i '/^#\[multilib\]/{s/^#//; n; s/^#//}' /etc/pacman.conf
+    fi
+    if [[ ! -s /etc/pacman.d/gnupg/pubring.gpg ]]; then
+        pacman-key --init >/dev/null 2>&1 || true
+        pacman-key --populate archlinux >/dev/null 2>&1 || true
+    fi
+    pacman -Syy --noconfirm
+}
+
+VENDOR="$(gpu_vendor)"
+CMD="${1:-detect}"
+
+case "$CMD" in
+    detect)
+        marker=mesa
+        case "$VENDOR" in
+            amd) marker=vulkan-radeon ;; intel) marker=vulkan-intel ;; nvidia) marker=nvidia-utils ;;
+        esac
+        inst=false
+        if pacman -Qq "$marker" >/dev/null 2>&1 && pacman -Qq mangohud >/dev/null 2>&1; then inst=true; fi
+        printf '{"vendor":"%s","gaming_installed":%s}\n' "$VENDOR" "$inst"
+        ;;
+    packages)
+        gaming_pkgs "$VENDOR"
+        ;;
+    apply)
+        [[ $EUID -eq 0 ]] || exec pkexec "$0" "$@"
+        echo ">> Graphics profile: gaming/desktop (GPU: $VENDOR)."
+        echo ">> Userspace packages only — no kernel, KMS or bootloader changes."
+        prep_pacman || { echo "ERROR: could not refresh databases (check Settings -> Network)."; exit 4; }
+        read -r -a PKGS <<< "$(gaming_pkgs "$VENDOR")"
+        echo ">> Installing: ${PKGS[*]}"
+        # ⚠ BOOT-SAFETY: see outlaw-pkg-install — never do a partial upgrade on a
+        # persistent installed system (refresh + install without upgrading the rest
+        # can leave the desktop unable to start after a dependency soname bump). On
+        # an installed system upgrade alongside the install (-u); on the ephemeral
+        # live ISO a plain install is correct.
+        PAC_INSTALL=(-S --needed --noconfirm)
+        [[ -d /run/archiso ]] || PAC_INSTALL=(-Su --needed --noconfirm)
+        pacman "${PAC_INSTALL[@]}" "${PKGS[@]}"
+        echo ">> Done."
+        ;;
+    revert)
+        [[ $EUID -eq 0 ]] || exec pkexec "$0" "$@"
+        echo ">> Switching to the lean profile — removing gaming extras"
+        echo "   (keeping Vulkan/Mesa so an installed Steam/Proton stays intact)…"
+        # -R refuses if something still depends on them → safe. Ignore "not installed".
+        pacman -R --noconfirm gamemode lib32-gamemode mangohud 2>/dev/null || true
+        echo ">> Done."
+        ;;
+    *)
+        echo "usage: $0 detect|packages|apply|revert" >&2
+        exit 2
+        ;;
+esac

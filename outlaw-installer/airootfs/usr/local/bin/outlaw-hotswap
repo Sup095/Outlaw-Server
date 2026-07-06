@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-hotswap — jump to another installed operating system.
+# ----------------------------------------------------------------------------
+# Order of preference:
+#   1. UEFI BootNext via efibootmgr   (best for switching to Windows)
+#   2. GRUB one-shot via grub-reboot  (uses GRUB_DEFAULT=saved)
+#   3. systemd-boot one-shot via bootctl
+#   4. Reboot straight into the firmware/boot menu
+#
+# "--list" prints candidate targets (used by the shell) and exits.
+# Nothing reboots without an explicit confirmation.
+# ============================================================================
+set -euo pipefail
+
+is_efi() { [[ -d /sys/firmware/efi ]]; }
+need_root() { if [[ $EUID -ne 0 ]]; then exec sudo "$0" "$@"; fi; }
+
+# Current OS markers so we don't offer to "switch" to ourselves.
+SELF_RE='Outlaw|outlaw|Arch'
+
+list_efi() {
+    efibootmgr 2>/dev/null | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\?\s\+\(.*\)$/\1\t\2/p' \
+        | grep -Ev "$SELF_RE" || true
+}
+list_grub() {
+    local cfg
+    for cfg in /boot/grub/grub.cfg /boot/grub2/grub.cfg; do
+        [[ -r "$cfg" ]] || continue
+        grep -E "^\s*menuentry " "$cfg" | sed -E "s/^\s*menuentry ['\"]([^'\"]+)['\"].*/\1/" \
+            | grep -Ev "$SELF_RE" || true
+        return
+    done
+}
+
+if [[ "${1:-}" == "--list" ]]; then
+    if is_efi; then list_efi | cut -f2; else list_grub; fi
+    exit 0
+fi
+
+echo "=================================================="
+echo "            OUTLAW OS — HOTSWAP"
+echo "=================================================="
+echo
+
+mapfile -t OPTS < <(if is_efi; then list_efi; else list_grub | sed 's/^/----\t/'; fi)
+
+if [[ ${#OPTS[@]} -eq 0 ]]; then
+    echo "No other operating systems were detected automatically."
+    read -rp "Reboot into the firmware/boot menu now? [y/N] " a
+    [[ "$a" =~ ^[Yy]$ ]] || { echo "Cancelled."; exit 0; }
+    need_root "$@"
+    if is_efi; then systemctl reboot --firmware-setup; else systemctl reboot; fi
+    exit 0
+fi
+
+echo "Available targets:"
+i=1
+for o in "${OPTS[@]}"; do
+    printf "  %d) %s\n" "$i" "$(echo "$o" | cut -f2-)"
+    i=$((i + 1))
+done
+echo "  0) Cancel"
+echo
+read -rp "Switch to which OS on next boot? " choice
+[[ "$choice" =~ ^[0-9]+$ ]] || { echo "Invalid."; exit 1; }
+[[ "$choice" -eq 0 ]] && { echo "Cancelled."; exit 0; }
+(( choice >= 1 && choice <= ${#OPTS[@]} )) || { echo "Out of range."; exit 1; }
+
+sel="${OPTS[$((choice - 1))]}"
+name="$(echo "$sel" | cut -f2-)"
+echo
+read -rp "Set next boot to \"$name\" and reboot now? [y/N] " a
+[[ "$a" =~ ^[Yy]$ ]] || { echo "Cancelled."; exit 0; }
+
+need_root "$@"
+
+if is_efi; then
+    bootnum="$(echo "$sel" | cut -f1)"
+    efibootmgr -n "$bootnum" >/dev/null
+    echo "Next boot set to $name (BootNext=$bootnum)."
+elif command -v grub-reboot >/dev/null 2>&1; then
+    grub-reboot "$name"
+    echo "Next boot set to $name via GRUB."
+elif command -v bootctl >/dev/null 2>&1; then
+    bootctl set-oneshot "$name" || true
+    echo "Next boot set to $name via systemd-boot."
+fi
+
+echo "Rebooting…"
+systemctl reboot

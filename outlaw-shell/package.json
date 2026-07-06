@@ -1,0 +1,47 @@
+{
+  "name": "outlaw-os",
+  "version": "2.0.180",
+  "description": "Outlaw OS - lightweight, secure Linux desktop for AI-driven Godot game development with a built-in local AI (Ollama / LM Studio optional) + Steam",
+  "main": "main.js",
+  "author": "Outlaw OS",
+  "license": "SEE LICENSE IN LICENSE",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "electron": "^41.2.1"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.outlaw.os",
+    "files": [
+      "main.js",
+      "preload.js",
+      "ai-agent.js",
+      "renderer.js",
+      "syscore.js",
+      "diagnostics.js",
+      "diagnostics-cli.js",
+      "tts.js",
+      "dialogue.js",
+      "dialogue.json",
+      "vram-tier.js",
+      "coreai.js",
+      "updater.js",
+      "errorlog.js",
+      "help-data.js",
+      "index.html",
+      "styles.css"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "System"
+    }
+  }
+}

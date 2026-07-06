@@ -1,0 +1,74 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-pkg-install — install packages reliably from the Apps panel.
+# ----------------------------------------------------------------------------
+# Run as root (the shell calls it via `pkexec outlaw-pkg-install <pkgs…>`).
+# Fixes the common reasons a fresh Outlaw install can't install things:
+#
+#   * Steam / 32-bit libs need the [multilib] repo, which Arch ships DISABLED.
+#     Systems installed before that was automated have it off, so `lib32-*`
+#     packages error out ("target not found" / "failed to synchronize"). We
+#     enable it on demand when a lib32 / steam package is requested.
+#   * "failed to synchronize databases" usually means a stale/partial local DB
+#     (very common right after flipping multilib on) — a forced -Syy fixes it.
+#   * An empty keyring breaks signature checks — initialise it if needed.
+#
+# Then install with --needed --noconfirm. Exit codes map to clear UI messages.
+# ============================================================================
+set -uo pipefail
+
+[[ $EUID -eq 0 ]] || exec pkexec "$0" "$@"
+
+PKGS=("$@")
+[[ ${#PKGS[@]} -gt 0 ]] || { echo "outlaw-pkg-install: no packages given" >&2; exit 2; }
+
+# Ensure the [multilib] repo is enabled. Steam, Wine, Lutris and all the 32-bit
+# gaming libraries live there, and Arch ships it DISABLED. Systems installed
+# before this was automated have it off, so those installs fail outright. It's
+# harmless to enable for everyone (this is a gaming OS) and idempotent.
+if ! grep -qE '^\[multilib\]' /etc/pacman.conf; then
+    echo ">> Enabling the multilib repository (Steam / Wine / 32-bit libraries)…"
+    # Uncomment the [multilib] header AND its following Include line.
+    sed -i '/^#\[multilib\]/{s/^#//; n; s/^#//}' /etc/pacman.conf
+    grep -qE '^\[multilib\]' /etc/pacman.conf \
+        || { echo "ERROR: could not enable multilib in /etc/pacman.conf"; exit 3; }
+fi
+
+# Initialise the signing keyring if it's empty (signed DBs + packages need it).
+if [[ ! -s /etc/pacman.d/gnupg/pubring.gpg ]]; then
+    echo ">> Initialising package-signing keys…"
+    pacman-key --init >/dev/null 2>&1 || true
+    pacman-key --populate archlinux >/dev/null 2>&1 || true
+fi
+
+# Force a FULL database refresh. -Syy (double y) re-downloads every db even if
+# pacman thinks it's current — this is what clears "failed to synchronize
+# databases" after enabling multilib or with a stale local copy.
+echo ">> Refreshing package databases…"
+if ! pacman -Syy --noconfirm; then
+    echo "ERROR: could not synchronize package databases."
+    echo "       Check your internet connection (Settings → Network & Wi-Fi) and try again."
+    exit 4
+fi
+
+echo ">> Installing: ${PKGS[*]}"
+# ⚠ BOOT-SAFETY: installing with a freshly-refreshed DB but WITHOUT upgrading the
+# rest of the system is a "partial upgrade" — on Arch the #1 way to break a running
+# system. A dependency's soname can bump (icu/glibc/gcc-libs are the classic cases)
+# and the upgraded lib then mismatches already-installed software, INCLUDING the
+# desktop shell, so it won't start → no desktop. So on a persistent installed
+# system we upgrade the system alongside the install (-u), keeping the library set
+# coherent. The live ISO is ephemeral (RAM overlay, resets on reboot) so a plain
+# install is correct there and a full upgrade would needlessly fill the tmpfs.
+PAC_INSTALL=(-S --needed --noconfirm)
+if [[ ! -d /run/archiso ]]; then
+    PAC_INSTALL=(-Su --needed --noconfirm)
+    echo "   (updating the system too, so the new packages stay compatible — this is what keeps installs from breaking your desktop)"
+fi
+if ! pacman "${PAC_INSTALL[@]}" "${PKGS[@]}"; then
+    echo "ERROR: the install did not complete (see the messages above)."
+    exit 5
+fi
+
+echo ">> Done."
+exit 0

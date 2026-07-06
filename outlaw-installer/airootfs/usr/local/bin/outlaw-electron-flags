@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-electron-flags — print the Electron CLI flags appropriate for THIS
+# host, one per line. Greeter / shell / first-boot wizard launchers wrap
+# `electron` with the output of this script.
+# ----------------------------------------------------------------------------
+# Why this exists:
+#
+#   Electron's default compositor wants a working OpenGL / Vulkan stack. On
+#   VirtualBox / QEMU with 3D acceleration disabled (the common default for
+#   tester VMs), GPU init either hangs or renders to an invisible surface —
+#   you get a black screen with just the framebuffer cursor in the corner,
+#   no UI ever appears. Same symptom under most hypervisors without a 3D
+#   passthrough configured.
+#
+#   The reliable fix is to disable GPU compositing in Electron only when
+#   we're running inside a hypervisor. On real hardware, GPU compositing
+#   stays on and animations are smooth. systemd-detect-virt gives us a
+#   one-line, vendor-agnostic VM check, and is part of systemd (always
+#   present on a systemd Arch system).
+#
+# Output (one flag per line):
+#   --no-sandbox                   always (matches existing greeter behaviour)
+#   --disable-gpu                  only when in a VM
+#   --disable-gpu-compositing      only when in a VM
+#
+# Usage from a launcher:
+#   mapfile -t FLAGS < <(outlaw-electron-flags)
+#   exec electron "${FLAGS[@]}" /path/to/app
+# ============================================================================
+
+# --no-sandbox: live-ISO + sandboxed-user combos can fail to open the user
+# namespace Electron wants. We trust our own apps (closed surfaces, no remote
+# code load) so disabling the sandbox is a known-safe trade-off.
+echo "--no-sandbox"
+
+# Detect virtualization. systemd-detect-virt prints "none" on bare metal and
+# a short keyword (oracle / qemu / kvm / vmware / xen / microsoft / etc.) when
+# inside a hypervisor.
+virt="none"
+if command -v systemd-detect-virt >/dev/null 2>&1; then
+    virt="$(systemd-detect-virt 2>/dev/null || echo none)"
+fi
+
+if [[ "$virt" != "none" && -n "$virt" ]]; then
+    # Inside a hypervisor — GPU init is unreliable, always disable compositing.
+    echo "--disable-gpu"
+    echo "--disable-gpu-compositing"
+elif [[ "${OUTLAW_FORCE_GPU:-0}" != "1" ]]; then
+    # Bare metal: disable the GPU only if hardware GL has PROVEN unreliable on
+    # this host — either we've already fallen back to safe graphics (sticky
+    # marker ~/.outlaw-safe-gfx) or the desktop session crashed (watchdog
+    # counter). Lets a flaky Intel/Mesa box ("failed to load module intel")
+    # drop to software GL automatically; good hardware is never penalised.
+    safe=0
+    [[ -f "$HOME/.outlaw-safe-gfx" ]] && safe=1
+    if [[ "$safe" != "1" && -f "$HOME/.outlaw-session-fails" ]]; then
+        fn="$(grep -oE '"fails"[[:space:]]*:[[:space:]]*[0-9]+' "$HOME/.outlaw-session-fails" | grep -oE '[0-9]+$' | tail -n1)"
+        fs="$(grep -oE '"session"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.outlaw-session-fails" | sed -E 's/.*"([^"]*)"$/\1/')"
+        [[ "${fn:-0}" -ge 1 && "$fs" == "desktop" ]] && safe=1
+    fi
+    if [[ "$safe" == "1" ]]; then
+        echo "--disable-gpu"
+        echo "--disable-gpu-compositing"
+    fi
+fi
+
+# Always exit 0 — a launcher script should never get a non-zero exit from
+# this helper, even on weird hosts where systemd-detect-virt is missing.
+exit 0

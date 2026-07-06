@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+    <title>Outlaw OS — Setup</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+    <main id="app">
+        <!-- Stage 1: bundle picker -->
+        <section id="picker" class="stage stage-active">
+            <header>
+                <h1>Welcome to Outlaw OS.</h1>
+                <p class="sub">
+                    Pick the optional bundles you'd like installed now. You can
+                    install or remove any of these later from the Apps panel
+                    in the desktop shell — nothing here is permanent.
+                </p>
+            </header>
+
+            <div id="net-warn" class="net-warn" hidden>
+                ⚠ <strong>No internet connection.</strong> These bundles download
+                from the internet. Plug in a network cable (automatic) or join Wi-Fi:
+                <div class="net-btns">
+                    <button id="wifi-show" class="btn-secondary">📶 Show Wi-Fi networks</button>
+                    <button id="net-retry" class="btn-secondary">⟳ Check again</button>
+                </div>
+                <div id="wifi-area" class="wifi-list" hidden></div>
+            </div>
+
+            <ul id="bundle-list" class="bundles"></ul>
+
+            <footer class="actions">
+                <button id="skip-btn" class="btn-secondary">
+                    Skip all — set up later
+                </button>
+                <button id="install-btn" class="btn-primary">
+                    Install selected
+                </button>
+            </footer>
+        </section>
+
+        <!-- Stage 2: live install progress -->
+        <section id="progress" class="stage">
+            <header>
+                <h1>Installing…</h1>
+                <p class="sub">
+                    Don't close this window. Each bundle is installed in turn;
+                    polkit will prompt for your password the first time.
+                </p>
+            </header>
+
+            <ul id="bundle-status" class="bundles bundles-status"></ul>
+
+            <pre id="log" class="log" aria-live="polite"></pre>
+
+            <footer class="actions actions-progress">
+                <button id="finish-btn" class="btn-primary" disabled>
+                    Finish
+                </button>
+            </footer>
+        </section>
+
+        <!-- Stage 3: nothing-to-do (Skip All path) -->
+        <section id="skipped" class="stage">
+            <header>
+                <h1>Skipped.</h1>
+                <p class="sub">
+                    You can install any of these bundles later from the Apps
+                    panel in the desktop shell. This wizard won't appear again.
+                </p>
+            </header>
+            <footer class="actions">
+                <button id="skipped-finish-btn" class="btn-primary">
+                    Continue to desktop
+                </button>
+            </footer>
+        </section>
+    </main>
+
+    <script src="renderer.js" defer></script>
+</body>
+</html>

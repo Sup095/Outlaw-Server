@@ -1,0 +1,116 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-lm-studio — find & launch LM Studio, or point the user at the download.
+# ----------------------------------------------------------------------------
+# LM Studio is a vendor AppImage from https://lmstudio.ai (not in the Arch
+# repos). The "Open LM Studio" button in the shell runs THIS script so it can
+# treat LM Studio like any other app. Priority:
+#
+#   1. An installed LM Studio binary (on PATH or at a known location).
+#   2. A downloaded LM Studio *.AppImage anywhere sensible (Downloads, etc.) —
+#      we chmod +x it and run it FOR the user. Handles versioned names like
+#      "LM-Studio-0.3.x.AppImage". Runs via FUSE when present, else with
+#      --appimage-extract-and-run so it works even without fuse2 installed.
+#      This is the common case right after the user downloads the AppImage.
+#   3. Nothing found → open the download page so they can grab it.
+#
+# We deliberately do NOT auto-download the AppImage (hundreds of MB + the
+# vendor's own page should present their license).
+# ============================================================================
+set -u
+
+DOWNLOAD_URL="https://lmstudio.ai/download"
+
+# Installed (non-AppImage) binaries, in order of preference.
+CANDIDATES=(
+    "$HOME/.local/bin/lm-studio"
+    "$HOME/.local/bin/lmstudio"
+    "/opt/lm-studio/lm-studio"
+    "/opt/lmstudio/lmstudio"
+    "/usr/local/bin/lm-studio"
+    "/usr/bin/lm-studio"
+)
+PATH_NAMES=(lm-studio lmstudio LM-Studio)
+
+notify() {
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send "Outlaw OS" "$1" 2>/dev/null || true
+    fi
+    echo "$1"
+}
+
+open_url() {
+    local url="$1" b
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" >/dev/null 2>&1 &
+        disown 2>/dev/null || true
+        return 0
+    fi
+    for b in firefox chromium chromium-browser opera; do
+        if command -v "$b" >/dev/null 2>&1; then
+            "$b" "$url" >/dev/null 2>&1 &
+            disown 2>/dev/null || true
+            return 0
+        fi
+    done
+    return 1
+}
+
+launch_bin() {
+    "$1" "${@:2}" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+}
+
+# Newest LM Studio AppImage across the usual download/app folders (case-
+# insensitive, any version), or empty if none. -maxdepth 1 keeps it fast.
+find_appimage() {
+    local dirs=() d
+    for d in "$HOME/Downloads" "$HOME/Applications" "$HOME/Desktop" \
+             "$HOME/AppImages" "$HOME" "$HOME/.local/bin"; do
+        [[ -d "$d" ]] && dirs+=("$d")
+    done
+    [[ ${#dirs[@]} -gt 0 ]] || return 0
+    find "${dirs[@]}" -maxdepth 1 -type f -iname '*lm*studio*.appimage' \
+        -printf '%T@\t%p\n' 2>/dev/null | sort -rn | head -n1 | cut -f2-
+}
+
+launch_appimage() {
+    local app="$1"
+    chmod +x "$app" 2>/dev/null || true
+    notify "Starting LM Studio…"
+    if ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
+        "$app" >/dev/null 2>&1 &
+    else
+        # No FUSE2 on this system — run the AppImage without mounting it.
+        "$app" --appimage-extract-and-run >/dev/null 2>&1 &
+    fi
+    disown 2>/dev/null || true
+}
+
+# 1) Installed binary at a known path.
+for path in "${CANDIDATES[@]}"; do
+    if [[ -x "$path" ]]; then launch_bin "$path" "$@"; exit 0; fi
+done
+
+# 2) Installed binary on PATH.
+for name in "${PATH_NAMES[@]}"; do
+    if command -v "$name" >/dev/null 2>&1; then
+        launch_bin "$(command -v "$name")" "$@"
+        exit 0
+    fi
+done
+
+# 3) A downloaded AppImage — make it executable and run it for the user.
+APP="$(find_appimage)"
+if [[ -n "${APP:-}" && -f "$APP" ]]; then
+    launch_appimage "$APP"
+    exit 0
+fi
+
+# 4) Nothing found — open the download page and explain.
+notify "LM Studio isn't installed yet. Opening the download page — get the Linux .AppImage (save it to Downloads), then press this button again and Outlaw will launch it for you."
+if open_url "$DOWNLOAD_URL"; then
+    exit 0
+fi
+echo "Could not open $DOWNLOAD_URL automatically. Visit it in any browser to download LM Studio." >&2
+exit 1

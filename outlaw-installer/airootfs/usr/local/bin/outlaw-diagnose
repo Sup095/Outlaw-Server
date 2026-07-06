@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-diagnose — wrapper for the diagnostics CLI bundled with the shell.
+# ----------------------------------------------------------------------------
+# Invoked by:
+#   * The systemd timers (outlaw-diagnose-{daily,weekly,monthly}.timer)
+#   * The user from a terminal or a script
+#   * The shell's "Run now" button (via the scheduled:run-now IPC, which
+#     just shells out to `systemctl --user start outlaw-diagnose@<p>.service`)
+#
+# Hands off to the Node-based CLI at /usr/share/outlaw-os/diagnostics-cli.js,
+# which runs the same test catalogue the shell uses for in-app diagnostics.
+#
+# Exits:
+#   0   all tests passed (or all skipped)
+#   1   at least one failure
+#   2   at least one warning (no failures)
+#   3   internal error
+#   127 node or CLI not found
+# ============================================================================
+set -uo pipefail
+
+SHELL_DIR="/usr/share/outlaw-os"
+CLI="$SHELL_DIR/diagnostics-cli.js"
+
+if [[ ! -f "$CLI" ]]; then
+    echo "outlaw-diagnose: CLI not found at $CLI" >&2
+    echo "  (Outlaw shell payload missing — was the OS installed correctly?)" >&2
+    exit 127
+fi
+
+# Prefer the system node; fall back to nodejs (Debian-style) if needed.
+NODE_BIN=""
+if command -v node >/dev/null 2>&1; then
+    NODE_BIN=node
+elif command -v nodejs >/dev/null 2>&1; then
+    NODE_BIN=nodejs
+else
+    # Electron's bundled node — last resort if nothing else is available. Not
+    # used on Arch (we install `nodejs`) but lets the CLI degrade on minimal
+    # systems.
+    if command -v electron >/dev/null 2>&1; then
+        NODE_BIN="electron --no-sandbox"
+    else
+        echo "outlaw-diagnose: no node interpreter on PATH" >&2
+        exit 127
+    fi
+fi
+
+exec $NODE_BIN "$CLI" "$@"

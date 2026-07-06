@@ -1,0 +1,157 @@
+# ============================================================================
+# Outlaw OS - live Boot Manager package set
+# Installed packages for the actual on-disk OS are pacstrapped by outlaw-install
+# (it reuses this same list). Everything here is from the official Arch repos
+# (core/extra/multilib) so the ISO builds without AUR.
+#
+# THE DEFAULT INSTALL IS MINIMAL — the OS only pre-bundles what's needed to
+# (1) boot securely, (2) drive a stripped-down Electron shell, (3) run Steam,
+# (4) edit Godot projects with Outlaw CodeMaker, and (5) talk to LM Studio.
+# Everything else (Blender, GIMP, VS Code, Lutris, Wine, security toolkit,
+# alternative browsers, etc.) is available on demand via the Apps panel in
+# the shell, which calls `pkexec pacman -S <pkg>` for the user.
+# ============================================================================
+
+# --- Base system ---
+base
+linux
+linux-firmware
+intel-ucode
+amd-ucode
+mkinitcpio
+sudo
+polkit
+networkmanager
+curl
+wget
+git
+nano
+# pacman-contrib provides `checkupdates` — the System Package Updates panel uses
+# it to count available updates safely (without touching the live database).
+pacman-contrib
+# zram-generator powers the optional compressed-RAM swap that the "Tune This
+# PC" panel (outlaw-tune) enables on low-memory machines. Tiny; no effect
+# unless outlaw-tune writes a zram config.
+zram-generator
+
+# --- Bootloader / install tooling ---
+# syslinux is required by the bios.syslinux.* bootmodes declared in
+# profiledef.sh — without it mkarchiso fails ISO validation before build.
+# mkinitcpio-archiso provides the live-init hooks the boot image needs;
+# missing it produces a USB stick that boots to a kernel panic.
+syslinux
+mkinitcpio-archiso
+grub
+efibootmgr
+os-prober
+dosfstools
+mtools
+arch-install-scripts
+gptfdisk
+parted
+# memtest86+ and edk2-shell are referenced by the upstream releng GRUB menu
+# we inherit. They're not strictly required to boot, but missing them
+# produces noisy warnings during validation and the corresponding boot-menu
+# entries silently disappear. Cheap to include.
+memtest86+
+memtest86+-efi
+edk2-shell
+# gparted is INSTALLED IN THE LIVE ISO ONLY (not in the on-disk install set in
+# outlaw-install's PKGS array) so first-time users can resize Windows / other
+# OS partitions from the live environment if they need to make space for
+# Outlaw, without bloating the post-install footprint.
+gparted
+# ntfs-3g provides ntfsresize, which the installer's "install alongside
+# Windows" path uses to shrink NTFS partitions automatically (probed
+# read-only first; refuses dirty volumes). gparted only lists it as an
+# optional dependency, so it must be named explicitly here.
+ntfs-3g
+
+# --- Security hardening ---
+apparmor
+firejail
+ufw
+
+# --- Desktop / shell runtime ---
+xorg-server
+xorg-xinit
+# Xorg video drivers. The primary path is the kernel's "modesetting" driver
+# over whatever KMS driver the GPU exposes — vmwgfx (VirtualBox VMSVGA),
+# vboxvideo (VirtualBox VBoxVGA), or a real GPU's driver. These two extras are
+# automatic fallbacks Xorg tries if modesetting can't open a screen:
+#   * xf86-video-vesa  — works via the real-mode VESA BIOS (BIOS boot).
+#   * xf86-video-fbdev — renders to a kernel framebuffer (/dev/fb0), e.g. efifb.
+# (xf86-video-vmware was dropped from the Arch repos; vmwgfx in-kernel covers
+# VMSVGA.) We do NOT force a specific driver or use `nomodeset` — letting Xorg
+# auto-select is what works across BIOS, UEFI, VMs, and real hardware.
+xf86-video-vesa
+xf86-video-fbdev
+picom
+feh
+rofi
+thunar
+xfce4-terminal
+electron
+# fuse2: lets AppImages (e.g. the LM Studio download) mount and run. Without it
+# AppImages won't launch at all.
+fuse2
+# openbox: a tiny window manager so launched app windows get real title bars
+# (minimize / maximize / close) + drag/resize. tint2: a taskbar showing every
+# window, click to restore minimized ones. The Outlaw shell stays the frameless
+# full-screen backdrop; apps float above it. Both are guarded in .xinitrc — if
+# they're absent the session falls back to the old no-WM kiosk.
+openbox
+tint2
+
+# --- Audio (PipeWire) ---
+# WITHOUT THIS THE SYSTEM HAS NO SOUND. pipewire-pulse / pipewire-alsa give
+# Pulse/ALSA app compatibility (games, browsers, Godot); wireplumber is the
+# session manager; alsa-utils provides amixer/alsactl and backs the desktop's
+# topbar volume control. Socket-activated by the user's systemd instance on
+# login (pam_systemd) — no manual start needed.
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+alsa-utils
+
+ttf-jetbrains-mono
+noto-fonts
+
+# --- Local AI ---
+# LM Studio (https://lmstudio.ai) is not in Arch repos — it's an AppImage the
+# user downloads at first launch via /usr/local/bin/outlaw-lm-studio. We only
+# pre-install a launcher (the shell calls it for the AI assistant).
+
+# --- GPU stack for the live shell ---
+# We only ship mesa in the live ISO — enough to run the Electron shell, the
+# installer, GParted, and the welcome card. The FULL gaming stack (Steam +
+# gamescope + gamemode + Vulkan + lib32-*) is installed onto the user's disk
+# by outlaw-install — see the PKGS array in airootfs/usr/local/bin/outlaw-install.
+#
+# Why the divergence: GitHub release assets cap at 2 GB. Bundling Steam (~600 MB)
+# + lib32 gaming deps (~150 MB) into the live ISO pushed it over the limit
+# without giving the live USB anything it needs — nobody plays Steam games off
+# a USB stick. The installed system still gets everything, pulled fresh from
+# mirrors during install.
+mesa
+
+# --- Browser (default; alternatives via Apps panel) ---
+firefox
+
+# --- Game development essentials (Godot needs base-devel / python / cmake
+#     for some addons; everything else moves to Apps panel) ---
+godot
+base-devel
+python
+python-pip
+cmake
+
+# --- Outlaw CodeMaker runtime deps (for the Dev session) ---
+# CodeMaker itself lives at /opt/outlaw-codemaker (bundled by build.sh) and
+# uses a venv created during outlaw-install. These are the system-level deps
+# its venv libs link against.
+xdotool
+scrot
+tesseract
+tesseract-data-eng

@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-start-session — start the graphical session, with a crash-loop guard.
+# ----------------------------------------------------------------------------
+# Called from ~/.bash_profile / ~/.zprofile on tty1 instead of a blind
+# `exec startx`. The blind version had a fatal failure mode: if X can't
+# start (no working video driver, Electron GPU crash, etc.), startx exits
+# immediately, the login session ends, getty relaunches, autologin fires,
+# and we `exec startx` again — an INVISIBLE INFINITE LOOP. The user just
+# sees the screen flicker between a getty message and black, forever, with
+# no way to read the error.
+#
+# This wrapper breaks that loop:
+#
+#   * A graphical session that runs at least HEALTHY_SECONDS is considered
+#     good. When it exits (user logs out of the shell), we relaunch X —
+#     preserving the kiosk-style "always return to the shell" behaviour.
+#
+#   * A session that dies in under HEALTHY_SECONDS counts as a failure.
+#     After MAX_FAILS rapid failures in a row, we STOP auto-launching X and
+#     drop the user to an interactive TTY login shell with a clear message
+#     pointing at the logs. They can read the error, fix it, and type
+#     `startx` (or `outlaw-start-session`) to retry.
+#
+# Because the caller invokes us WITHOUT `exec`, returning from this script
+# lands the user on their normal interactive shell — never a black void.
+# ============================================================================
+
+set -u
+
+HEALTHY_SECONDS=20      # X must survive this long to count as a good session
+MAX_FAILS=3             # consecutive fast failures before we give up auto-X
+STATE="$HOME/.outlaw-x-fails"   # single integer: consecutive fast failures
+XLOG="$HOME/.outlaw-x.log"
+
+# Only auto-start X on the first virtual terminal. Other TTYs stay text.
+# (Caller already checks this, but double-checking keeps the script safe to
+# run by hand without hijacking a random TTY into X.)
+if [[ -n "${DISPLAY:-}" ]]; then
+    echo "outlaw-start-session: \$DISPLAY already set — refusing to nest X." >&2
+    exit 1
+fi
+
+read_fails() {
+    [[ -f "$STATE" ]] || { echo 0; return; }
+    local n; n="$(tr -cd '0-9' < "$STATE" 2>/dev/null)"
+    echo "${n:-0}"
+}
+write_fails() { printf '%s\n' "$1" > "$STATE" 2>/dev/null || true; }
+
+# Print the actual reason X failed straight to the console (and the serial
+# port, if one exists) so a stuck tester can SEE/photograph it instead of
+# staring at a blank screen. Shows the tail of both the session log (our
+# .xinitrc stderr) and the Xorg server log.
+_dump_logs() {
+    local xorglog="$HOME/.local/share/xorg/Xorg.0.log" out
+    out="$(
+        echo ""
+        echo "================ why the desktop didn't start ================"
+        if [[ -f "$XLOG" ]]; then
+            echo "--- session log tail ($XLOG) ---"
+            tail -n 25 "$XLOG" 2>/dev/null
+        fi
+        if [[ -f "$xorglog" ]]; then
+            echo "--- Xorg log tail ($xorglog) ---"
+            tail -n 25 "$xorglog" 2>/dev/null
+            echo "--- Xorg errors (EE) ---"
+            grep -E '\(EE\)|no screens found|Cannot run in framebuffer' "$xorglog" 2>/dev/null | tail -n 15
+        fi
+        echo "============================================================="
+    )"
+    # To the console this script runs on…
+    printf '%s\n' "$out" >&2
+    # …and to a serial port if the VM has one (lets a stuck tester capture it).
+    [[ -w /dev/ttyS0 ]] && printf '%s\n' "$out" > /dev/ttyS0 2>/dev/null || true
+}
+
+FAILS="$(read_fails)"
+
+# If we've already failed too many times in a row, don't loop again — hand
+# the user a usable shell and clear instructions instead.
+if (( FAILS >= MAX_FAILS )); then
+    cat >&2 <<MSG
+
+  ┌────────────────────────────────────────────────────────────────┐
+  │  Outlaw OS — graphical session isn't starting                   │
+  └────────────────────────────────────────────────────────────────┘
+
+  The desktop failed to start $FAILS times in a row, so automatic launch
+  is paused to avoid an endless retry loop. You're now at a normal
+  command-line shell — the system is fine, only the GUI didn't come up.
+
+  What to check:
+    * X server log : ~/.local/share/xorg/Xorg.0.log
+    * Session log  : $XLOG
+    * Quick report : run  outlaw-diagnose   (if available)
+
+  To try the desktop again, run:   startx
+  (that resets the counter; if it works, normal boot resumes next time)
+
+MSG
+    _dump_logs
+    # Reset so a manual startx / next login gets a clean attempt.
+    write_fails 0
+    exit 0
+fi
+
+# ----- Attempt to launch X --------------------------------------------------
+# We loop here so a HEALTHY session that the user exits relaunches X (kiosk
+# behaviour) without bouncing through getty. A fast failure breaks out.
+while true; do
+    START_TS="$(date +%s)"
+    # startx runs ~/.xinitrc. Its own stderr already goes to ~/.outlaw-x.log
+    # (the .xinitrc redirects). The Xorg server log lands in
+    # ~/.local/share/xorg/Xorg.0.log by default.
+    startx
+    END_TS="$(date +%s)"
+    RAN_FOR=$(( END_TS - START_TS ))
+
+    if (( RAN_FOR >= HEALTHY_SECONDS )); then
+        # Good session. Reset the failure counter and relaunch (kiosk loop).
+        write_fails 0
+        # brief pause so a deliberate logout isn't a tight spin
+        sleep 1
+        continue
+    fi
+
+    # Fast exit → treat as a failure.
+    FAILS=$(( FAILS + 1 ))
+    write_fails "$FAILS"
+    echo "outlaw-start-session: graphical session exited after ${RAN_FOR}s (failure ${FAILS}/${MAX_FAILS})." >&2
+
+    if (( FAILS >= MAX_FAILS )); then
+        # Give up the loop; fall through to the interactive shell. Re-print
+        # the guidance so the user sees it right away.
+        cat >&2 <<MSG
+
+  Outlaw OS: the desktop failed to start ${FAILS} times. Dropping to a
+  command-line shell so you can see what's wrong.
+    X log     : ~/.local/share/xorg/Xorg.0.log
+    Session   : $XLOG
+  Type 'startx' to try again.
+
+MSG
+        _dump_logs
+        # Leave the counter at MAX so the next *login* also lands on a shell
+        # (not an infinite getty loop). A manual `startx` resets it on success.
+        exit 0
+    fi
+
+    # Under the limit — short backoff, then retry automatically.
+    sleep 2
+done

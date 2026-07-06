@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-install-aur — install ONE allowlisted AUR package, on demand.
+# ----------------------------------------------------------------------------
+# Outlaw OS deliberately ships without an AUR helper (yay/paru) installed,
+# and pacstrap can only pull from the official repos. A handful of tools we
+# care about — currently just `steamcmd`, used by Outlaw CodeMaker's Steam
+# publish flow — live in the AUR. Rather than ship a general-purpose AUR
+# helper (large attack surface, frequent updates, opinionated config), this
+# script handles ONE package at a time, picked from a hardcoded allowlist.
+#
+# Designed to be invoked via `pkexec` from the CodeMaker Steam panel:
+#
+#     pkexec /usr/local/bin/outlaw-install-aur steamcmd
+#
+# pkexec triggers the polkit password prompt; once the user authenticates,
+# we run with EUID 0. `makepkg` refuses to run as root, so we spawn a
+# throwaway `_aurbuild_$$` user with passwordless sudo for the build, then
+# delete it on exit via a trap.
+#
+# Exit codes:
+#   0  installed successfully (or already installed)
+#   2  usage error (bad arg, not run as root)
+#   3  package not on allowlist
+#   4  network / clone failure
+#   5  makepkg build / install failure
+# ============================================================================
+set -uo pipefail
+
+# ----------------------------------------------------------------------------
+# Allowlist. Add packages here as they're vetted. Each entry is checked
+# verbatim against the user's argument; no glob/regex matching.
+# ----------------------------------------------------------------------------
+ALLOWLIST=(
+    steamcmd
+)
+
+# ----------------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------------
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+grn()    { printf '\033[32m%s\033[0m\n' "$*"; }
+note()   { printf '[outlaw-install-aur] %s\n' "$*"; }
+die()    { red "[outlaw-install-aur] ERROR: $*" >&2; exit "${2:-1}"; }
+
+allowed() {
+    local pkg="$1" entry
+    for entry in "${ALLOWLIST[@]}"; do
+        [[ "$entry" == "$pkg" ]] && return 0
+    done
+    return 1
+}
+
+# ----------------------------------------------------------------------------
+# Preconditions
+# ----------------------------------------------------------------------------
+if [[ $EUID -ne 0 ]]; then
+    die "must run as root (call via pkexec)." 2
+fi
+
+PKG="${1:-}"
+if [[ -z "$PKG" ]]; then
+    die "usage: outlaw-install-aur <package-name>" 2
+fi
+if ! allowed "$PKG"; then
+    die "'$PKG' is not in the Outlaw AUR allowlist. Allowed: ${ALLOWLIST[*]}" 3
+fi
+
+# Already installed? Idempotent return.
+if pacman -Qi "$PKG" >/dev/null 2>&1; then
+    grn "[outlaw-install-aur] $PKG is already installed — nothing to do."
+    exit 0
+fi
+
+# ----------------------------------------------------------------------------
+# Ensure build prerequisites are present. base-devel + git are required for
+# any AUR build. They're in the default Outlaw OS package list, but adding
+# this --needed call costs nothing on a clean system and makes the helper
+# usable on vanilla Arch too.
+# ----------------------------------------------------------------------------
+note "Refreshing build dependencies (base-devel, git)…"
+pacman -S --needed --noconfirm base-devel git \
+    || die "pacman failed to install base-devel / git." 1
+
+# ----------------------------------------------------------------------------
+# Throwaway build user. PID-suffixed so concurrent invocations don't collide.
+# The sudoers drop lets makepkg run pacman to satisfy makedepends.
+# ----------------------------------------------------------------------------
+BUILD_USER="_aurbuild_$$"
+SUDOERS_FILE="/etc/sudoers.d/00-${BUILD_USER}"
+WORK_DIR="/tmp/outlaw-aur-${PKG}-$$"
+
+cleanup() {
+    set +e
+    # Best-effort cleanup — order matters: kill any leftover processes the
+    # build user owns, then delete the user (with home), then drop sudoers,
+    # then nuke the work tree.
+    pkill -KILL -u "$BUILD_USER" 2>/dev/null
+    userdel -rf "$BUILD_USER" 2>/dev/null
+    rm -f "$SUDOERS_FILE"
+    rm -rf "$WORK_DIR"
+}
+trap cleanup EXIT INT TERM
+
+note "Provisioning temporary build user $BUILD_USER…"
+useradd -m -G wheel "$BUILD_USER" || die "useradd $BUILD_USER failed." 1
+# Passwordless for the duration; cleanup trap deletes the file.
+printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$BUILD_USER" > "$SUDOERS_FILE"
+chmod 0440 "$SUDOERS_FILE"
+
+mkdir -p "$WORK_DIR"
+chown "$BUILD_USER:$BUILD_USER" "$WORK_DIR"
+
+# ----------------------------------------------------------------------------
+# Fetch from AUR. --depth=1 keeps the clone small. We use the canonical
+# https URL — no auth needed for read.
+# ----------------------------------------------------------------------------
+note "Cloning aur/$PKG…"
+if ! sudo -u "$BUILD_USER" -- \
+        git -C "$WORK_DIR" clone --depth=1 \
+        "https://aur.archlinux.org/${PKG}.git" "$PKG"; then
+    die "git clone of $PKG from AUR failed (network? AUR down?)" 4
+fi
+
+# ----------------------------------------------------------------------------
+# Build + install. -s pulls runtime deps from official repos, -i installs
+# the built package, --noconfirm skips Y/N prompts. makepkg writes the
+# .pkg.tar.zst into the build directory; sudo pacman -U is invoked by -i.
+# ----------------------------------------------------------------------------
+note "Building $PKG (makepkg -si)…"
+if ! sudo -u "$BUILD_USER" -- bash -lc "cd '$WORK_DIR/$PKG' && makepkg -si --noconfirm"; then
+    die "makepkg build/install of $PKG failed. See the log above." 5
+fi
+
+# ----------------------------------------------------------------------------
+# Verify the package actually landed in pacman's DB. If the AUR PKGBUILD is
+# subtly broken and makepkg "succeeded" without installing, we want to know.
+# ----------------------------------------------------------------------------
+if ! pacman -Qi "$PKG" >/dev/null 2>&1; then
+    die "$PKG was built but pacman -Qi can't find it post-install." 5
+fi
+
+grn "[outlaw-install-aur] Installed $PKG ($(pacman -Qi "$PKG" | awk '/^Version/{print $3}'))."
+exit 0

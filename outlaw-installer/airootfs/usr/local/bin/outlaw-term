@@ -1,0 +1,64 @@
+#!/bin/sh
+# ============================================================================
+# outlaw-term — run a command in a terminal window that ACTUALLY gets focus.
+# ----------------------------------------------------------------------------
+# The Outlaw desktop is a no-WM kiosk, so a freshly-launched terminal appears on
+# top but doesn't receive keyboard input (see outlaw-focus). This wrapper:
+#   1. launches <command> in the first available terminal emulator, with a known
+#      window title, and
+#   2. pulls keyboard focus to that window so the user can actually type, then
+#   3. when the terminal closes, hands focus back to the desktop shell so the
+#      keyboard isn't left with nothing focused.
+# Used for interactive TUIs launched from the shell (the installer, hotswap).
+#
+# Usage: outlaw-term "<title>" <command> [args...]
+# ============================================================================
+TITLE="$1"
+[ -n "$TITLE" ] || TITLE="Outlaw"
+shift
+[ "$#" -ge 1 ] || { echo "outlaw-term: no command given" >&2; exit 2; }
+
+# First terminal emulator that's actually installed wins.
+TERMBIN=""
+for t in xfce4-terminal xterm alacritty kitty konsole foot lxterminal; do
+    if command -v "$t" >/dev/null 2>&1; then TERMBIN="$t"; break; fi
+done
+if [ -z "$TERMBIN" ]; then
+    echo "outlaw-term: no terminal emulator found" >&2
+    exit 3
+fi
+
+# Wrap the command so the window does NOT vanish the instant it exits — errors
+# and "install complete" must stay readable, and with no window manager there's
+# no way to reopen a terminal that closed. The user presses Enter to close.
+# Before that final read we DRAIN any buffered keystrokes (Enters pressed while
+# the command was busy) — otherwise a stale Enter dismisses the window the
+# instant it appears and the user never sees why it ended. (`read -t 0` is a
+# bash-ism; on Arch /bin/sh IS bash, and the 2>/dev/null guard makes any other
+# sh skip the drain harmlessly.)
+CMD="$*"
+HOLD="$CMD; __rc=\$?; echo; echo '----------------------------------------'; echo \"[Outlaw] finished (exit \$__rc). Press Enter to close.\"; while read -r -t 0 __j 2>/dev/null; do read -r __j || break; done; read __dummy"
+
+# Launch the wrapper, titled, in the first available terminal. Running it via
+# `sh -c` uniformly sidesteps per-emulator quoting differences;
+# --disable-server (xfce4-terminal) forces a standalone, predictably-titled
+# process; -x / -e take the remaining args as the command to run.
+case "$TERMBIN" in
+    xfce4-terminal) "$TERMBIN" --disable-server --geometry=132x40 --title="$TITLE" -x sh -c "$HOLD" & ;;
+    xterm)          "$TERMBIN" -T "$TITLE" -e sh -c "$HOLD" & ;;
+    alacritty)      "$TERMBIN" --title "$TITLE" -e sh -c "$HOLD" & ;;
+    kitty)          "$TERMBIN" --title "$TITLE" sh -c "$HOLD" & ;;
+    konsole)        "$TERMBIN" -p tabtitle="$TITLE" -e sh -c "$HOLD" & ;;
+    foot)           "$TERMBIN" --title="$TITLE" sh -c "$HOLD" & ;;
+    lxterminal)     "$TERMBIN" -e "sh -c \"$HOLD\"" & ;;
+    *)              "$TERMBIN" -e sh -c "$HOLD" & ;;
+esac
+TPID=$!
+
+# Give the new terminal keyboard focus (no-WM safe, best-effort).
+outlaw-focus "$TITLE" 40
+
+# Hand focus back to the desktop shell (X window name "OUTLAW OS") on exit.
+wait "$TPID" 2>/dev/null
+outlaw-focus "OUTLAW OS" 10 >/dev/null 2>&1 || true
+exit 0

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw-update-rollback — swap the current /usr/share/outlaw-os with the
+# .prev copy left behind by `outlaw-update-apply`. Pairs with the shell's
+# Settings → Outlaw Shell Updates → Rollback button.
+#
+# The swap is symmetric: after rollback the "new" version is at .prev, so
+# the user can also roll FORWARD again with another invocation. We never
+# delete either copy — disk for one extra shell is trivial vs. the user's
+# ability to recover from a bad release.
+# ============================================================================
+set -euo pipefail
+
+TARGET="/usr/share/outlaw-os"
+BACKUP="/usr/share/outlaw-os.prev"
+
+[[ $EUID -eq 0 ]] || { echo "Must run as root (use pkexec)." >&2; exit 1; }
+
+if [[ ! -d "$BACKUP" ]]; then
+    echo "Nothing to roll back to — $BACKUP doesn't exist." >&2
+    exit 2
+fi
+if [[ ! -d "$TARGET" ]]; then
+    echo "Current shell directory missing — $TARGET doesn't exist." >&2
+    exit 3
+fi
+# Sanity check — refuse if the .prev doesn't look like a shell payload.
+if [[ ! -f "$BACKUP/main.js" || ! -f "$BACKUP/preload.js" ]]; then
+    echo "$BACKUP doesn't look like an Outlaw shell payload (missing main.js/preload.js)." >&2
+    exit 4
+fi
+
+TMP_TARGET="${TARGET}.swap.$$"
+mv "$TARGET" "$TMP_TARGET"
+mv "$BACKUP" "$TARGET"
+mv "$TMP_TARGET" "$BACKUP"
+
+chown -R root:root "$TARGET"
+chmod -R go-w "$TARGET"
+
+# Report what version we landed on for the shell's UI to surface.
+VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$TARGET/package.json" 2>/dev/null | head -n1 || true)"
+echo "Rolled back to v${VERSION:-?}. The previous shell is now at $BACKUP (use the rollback button again to swap back)."

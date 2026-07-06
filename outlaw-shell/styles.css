@@ -1,0 +1,1339 @@
+/* ===========================================================================
+   Outlaw OS shell theme
+   Green-phosphor terminal identity, but crisp and readable by default.
+   No scanlines, no flicker, no text glow unless the user opts in
+   (body.crt / body.glow) from Settings -> Appearance.
+   =========================================================================== */
+:root {
+    --term: #33ff00;
+    --term-dim: #1a8000;
+    --term-faint: #0d3d00;
+    --bg: #050705;
+    --panel: #0a0e0a;
+    --panel-2: #0d130d;
+    --line: #143d0d;
+    --danger: #ff3b3b;
+    --warn: #ffd23b;
+    --ok: #33ff00;
+    --text: #b9ffb0;
+    --term-rgb: 51, 255, 0;   /* accent as raw RGB for rgba() tints/glows */
+    --radius: 6px;
+}
+
+/* ===========================================================================
+ * Phase 11 — "Broken" mode. A third selectable theme (Settings → Appearance):
+ * the machine looks like it's barely holding together — a sickly, washed-out
+ * green-phosphor palette with red instability, plus subtle compositor-driven
+ * glitch FX (flicker, a rolling scanline tear, occasional heading jitter +
+ * chromatic split). PURE CSS — GPU-cheap transform/opacity animations only, no
+ * idle JS timers, so it honours the zero-idle-cost rule and has no boot impact.
+ * Doubles as the live-demo vibe: a broken thing you repair by installing.
+ * ======================================================================== */
+body.theme-broken {
+    --term:       #4be04b;   /* sickly, washed-out phosphor */
+    --term-dim:   #2a7a2a;
+    --term-faint: #123512;
+    --bg:         #060806;
+    --panel:      #0b0f0b;
+    --panel-2:    #0e140e;
+    --line:       #6b1b1b;   /* failing red hairlines */
+    --danger:     #ff3b3b;
+    --warn:       #ffae3b;
+    --ok:         #6be06b;
+    --text:       #9ad48f;   /* desaturated, slightly off */
+    --term-rgb:   75, 224, 75;
+    animation: brk-flicker 9s steps(64) infinite;   /* erratic, dying power */
+}
+/* Layered overlay: persistent CRT scanlines (static = free) + a red instability
+ * vignette that slowly pulses like a failing power supply. Fixed + non-interactive,
+ * sits under modal overlays. */
+body.theme-broken::before {
+    content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 35;
+    background:
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.22) 0, rgba(0,0,0,0.22) 1px, transparent 2px, transparent 3px),
+        radial-gradient(ellipse at 50% 50%, transparent 46%, rgba(150, 0, 0, 0.20) 100%);
+    animation: brk-pulse 5s ease-in-out infinite;
+}
+/* A rolling signal-loss band — brighter, with a red chromatic edge. */
+body.theme-broken::after {
+    content: ''; position: fixed; left: 0; right: 0; height: 24px; pointer-events: none; z-index: 36;
+    background: linear-gradient(rgba(75,224,75,0), rgba(130,255,130,0.16) 38%, rgba(255,45,45,0.12) 62%, rgba(75,224,75,0));
+    animation: brk-tear 7.5s linear infinite;
+}
+/* Erratic brownouts — a couple of deep dips per cycle where it nearly cuts out. */
+@keyframes brk-flicker {
+    0%, 100% { opacity: 1; }
+    3% { opacity: .80; }  4% { opacity: 1; }
+    11% { opacity: .95; } 12% { opacity: .62; } 13% { opacity: 1; }
+    37% { opacity: .90; } 38% { opacity: 1; }
+    58% { opacity: .85; } 59% { opacity: 1; }
+    70% { opacity: .50; } 71% { opacity: 1; }
+    88% { opacity: .93; } 89% { opacity: 1; }
+}
+@keyframes brk-pulse { 0%, 100% { opacity: .6; } 50% { opacity: 1; } }
+@keyframes brk-tear { 0% { top: -8%; } 100% { top: 108%; } }
+/* Headings glitch — heavier chromatic split + a hard displacement/skew once a
+ * cycle. Scoped to headings so body text stays readable. */
+body.theme-broken h1, body.theme-broken h2, body.theme-broken h3 {
+    text-shadow: 1.5px 0 rgba(255, 0, 0, 0.55), -1.5px 0 rgba(0, 200, 255, 0.45);
+    animation: brk-jitter 4.5s steps(1) infinite;
+}
+@keyframes brk-jitter {
+    0%, 45%, 56%, 100% { transform: translate(0, 0); }
+    47% { transform: translate(-3px, 1px) skewX(-7deg); }
+    49% { transform: translate(3px, -1px) skewX(5deg); }
+    52% { transform: translate(-2px, 0); }
+    54% { transform: translate(2px, 1px); }
+}
+/* --- Broken-mode live-faults theatre (renderer-driven, broken theme only) ---
+ * A short hard glitch spasm: compositor-only filter/transform, applied for
+ * ~320ms by renderer.js then removed. */
+body.theme-broken.brk-burst {
+    animation: brk-burst-fx .32s steps(3) 1;
+}
+@keyframes brk-burst-fx {
+    0%   { filter: hue-rotate(18deg) saturate(1.6) contrast(1.2); transform: translateX(2px); }
+    33%  { filter: invert(0.08) contrast(1.35); transform: translateX(-3px) skewX(0.4deg); }
+    66%  { filter: hue-rotate(-14deg) brightness(1.25); transform: translateX(1px); }
+    100% { filter: none; transform: none; }
+}
+/* Fake SYSTEM FAULT cards — bottom-right stack, under the REAL toast (z 1100)
+ * so genuine messages always win. pointer-events none = can't block clicks. */
+#brk-toasts {
+    position: fixed; right: 14px; bottom: 16px; z-index: 1050;
+    display: flex; flex-direction: column; gap: 8px;
+    max-width: 380px; pointer-events: none;
+}
+.brk-toast {
+    background: #140505; border: 1px solid var(--danger); border-left: 4px solid var(--danger);
+    color: #ffb0a8; padding: 8px 12px; border-radius: 5px; font-size: 12px; line-height: 1.45;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    animation: brk-toast-in .18s steps(2);
+}
+.brk-toast b { color: var(--danger); letter-spacing: .06em; }
+@keyframes brk-toast-in { from { transform: translateX(20px); opacity: 0; } }
+/* Rare full-screen SIGNAL LOST flash (~240ms). Below the loading screen
+ * (z 9000) — and the renderer skips firing while real overlays are up anyway. */
+#brk-flash {
+    position: fixed; inset: 0; z-index: 8500; background: #000;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--danger); font-size: 22px; letter-spacing: .2em;
+}
+#brk-flash[hidden] { display: none; }
+
+/* Both the OS "Reduce motion" setting and the OS-level preference calm it down to
+ * just the palette (no flicker/tear/jitter). */
+@media (prefers-reduced-motion: reduce) {
+    body.theme-broken,
+    body.theme-broken::before,
+    body.theme-broken::after,
+    body.theme-broken h1, body.theme-broken h2, body.theme-broken h3 { animation: none; }
+}
+body.reduce-motion.theme-broken,
+body.reduce-motion.theme-broken::before,
+body.reduce-motion.theme-broken::after,
+body.reduce-motion.theme-broken h1,
+body.reduce-motion.theme-broken h2,
+body.reduce-motion.theme-broken h3 { animation: none !important; }
+
+/* ===========================================================================
+ * Phase 12 — loading screen overlay (installs / long jobs). Two panes: phase
+ * steps on the left, a live streamed log on the right. Themed via the palette
+ * vars, so it recolors with green/gold and glitches under Broken mode.
+ * ======================================================================== */
+.ls-overlay { position: fixed; inset: 0; z-index: 9000; display: none;
+    align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.82); }
+.ls-overlay.show { display: flex; }
+.ls-card { width: 760px; max-width: 94vw; height: 460px; max-height: 90vh;
+    display: flex; flex-direction: column; background: var(--panel);
+    border: 1px solid var(--term-dim); border-radius: var(--radius);
+    box-shadow: 0 0 40px rgba(var(--term-rgb), 0.18); padding: 18px 20px; }
+.ls-title { font-size: 15px; font-weight: 700; color: var(--term); letter-spacing: .5px; margin-bottom: 12px; }
+.ls-body { flex: 1; display: grid; grid-template-columns: 220px 1fr; gap: 14px; min-height: 0; }
+.ls-steps { list-style: none; margin: 0; padding: 0; font-size: 12.5px; line-height: 1.5; }
+.ls-steps li { padding: 6px 8px; border-left: 2px solid var(--line); color: var(--term-dim); }
+.ls-steps li.active { border-left-color: var(--term); color: var(--term); }
+.ls-steps li.active::before { content: '▸ '; }
+.ls-steps li.done::before { content: '✓ '; }
+.ls-log { margin: 0; overflow: auto; background: #000; border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 8px 10px; font-size: 11px; line-height: 1.5;
+    color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.ls-bar { height: 4px; background: var(--line); border-radius: 3px; margin: 12px 0 10px; overflow: hidden; }
+.ls-bar > span { display: block; height: 100%; width: 35%; background: var(--term); border-radius: 3px;
+    animation: ls-slide 1.3s ease-in-out infinite; }
+.ls-bar.done > span { width: 100%; animation: none; }
+@keyframes ls-slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.ls-foot { display: flex; align-items: center; gap: 8px; }
+.ls-status { color: var(--term-dim); font-size: 11px; }
+
+/* ===========================================================================
+ * P1 — "Gold Gunmetal" theme (optional). Default is the green-phosphor :root
+ * above; this only applies when body has .theme-gold (Settings → Appearance →
+ * Theme). It re-points the whole palette to retro gold-on-gunmetal — the same
+ * look as Outlaw CodeMaker — so the desktop reads as aged brass on gunmetal: a
+ * centuries-old machine that's seen everything and is mildly amused by you.
+ * Pure CSS-variable swap → zero runtime cost, instant flip, no boot impact.
+ * ======================================================================== */
+body.theme-gold {
+    --term:       #e0b341;   /* outlaw gold — primary accent (was phosphor green) */
+    --term-dim:   #b8923a;   /* dimmed gold */
+    --term-faint: #4a3c18;   /* faint gold — hairlines / faint glow */
+    --bg:         #0b0e14;   /* gunmetal near-black */
+    --panel:      #12161f;
+    --panel-2:    #1a2130;
+    --line:       #2a3242;   /* gunmetal border */
+    --danger:     #e0625e;
+    --warn:       #e8a84c;
+    --ok:         #5cc97a;
+    --text:       #e6dcc0;   /* warm parchment — high contrast on gunmetal */
+    --term-rgb:   224, 179, 65;   /* gold as raw RGB → all glows/hovers turn gold */
+}
+/* Etched-brass flourishes — only paint in the gold theme so the default theme
+ * stays exactly as crisp as before. Deliberately tiny (one text-shadow + one
+ * short gradient) to honour the "no lag" rule. */
+body.theme-gold h2,
+body.theme-gold h3 {
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 1px rgba(224, 179, 65, 0.25);
+}
+body.theme-gold .card {
+    border-top: 1px solid var(--term-faint);
+    background-image: linear-gradient(180deg, rgba(224, 179, 65, 0.03), transparent 64px);
+}
+
+/* ===========================================================================
+ * A11y — High contrast (Settings → Appearance). Brighter text, no faded
+ * elements, stronger hairlines and thicker focus rings. Sits AFTER the theme
+ * blocks so it layers on top of green, gold and broken alike; text/line
+ * overrides are per-theme so gold stays gold.
+ * ======================================================================== */
+body.high-contrast { --text: #e4ffe0; --line: #1f5c14; }
+body.theme-gold.high-contrast { --text: #fff3d8; --line: #3d4a63; }
+body.theme-broken.high-contrast { --text: #c8f7c0; }
+body.high-contrast .muted { opacity: 1; }
+body.high-contrast .dim { color: var(--text); }
+body.high-contrast .label small,
+body.high-contrast small { color: var(--text); opacity: .9; }
+body.high-contrast .card { border-color: var(--term-dim); }
+body.high-contrast button { border-color: var(--term); }
+body.high-contrast button:focus-visible,
+body.high-contrast input[type="range"]:focus-visible { outline-width: 3px; }
+body.high-contrast .switch input:focus-visible + .track { outline-width: 3px; }
+body.high-contrast input, body.high-contrast textarea, body.high-contrast select { border-color: var(--term-dim); }
+
+/* Phase 15a — the desktop assistant's fixed persona name (Cr1tt3r), shown in the
+   AI Assistant header. Uses the palette accent so it recolors with the theme. */
+.ai-name {
+    color: var(--term);
+    font-weight: 700;
+    letter-spacing: 1px;
+    font-size: 13px;
+    opacity: 0.9;
+    margin-left: 10px;
+    align-self: center;
+}
+
+/* QoL — Reduce motion (Settings → Appearance). Near-instant animations/transitions
+   everywhere, which also calms the Broken-mode flicker/tear/jitter and trims work on
+   low-end GPUs. Functional UI uses [hidden] toggles, not transitions, so nothing
+   breaks. 0.001ms (not "none") keeps any animation-end handlers firing. */
+body.reduce-motion,
+body.reduce-motion::before,
+body.reduce-motion::after,
+body.reduce-motion *,
+body.reduce-motion *::before,
+body.reduce-motion *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+}
+
+/* 🗺 In-OS roadmap (Settings) — interactive collapsible groups + progress bars.
+   All theme-var driven so it recolors with green / gold / broken; CSS-only motion
+   (caret rotate + max-height), so reduce-motion calms it and idle cost is zero. */
+.rm-version { color: var(--term-dim); font-size: 11px; }
+.rm-group { border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; background: var(--panel); }
+.rm-head { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: transparent; border: 0; color: var(--text); cursor: pointer; text-align: left; font: inherit; }
+.rm-head:hover { background: rgba(var(--term-rgb), 0.07); }
+.rm-caret { color: var(--term-dim); transition: transform .18s ease; flex: 0 0 auto; }
+.rm-group.open .rm-caret { transform: rotate(90deg); }
+.rm-title { font-weight: 700; color: var(--term); letter-spacing: .3px; }
+.rm-badge { font-size: 9.5px; text-transform: uppercase; letter-spacing: 1px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); flex: 0 0 auto; }
+.rm-badge-now { color: var(--bg); background: var(--term); border-color: var(--term); }
+.rm-badge-done { color: var(--ok); border-color: var(--ok); }
+.rm-badge-exp { color: var(--warn); border-color: var(--warn); }
+.rm-bar { flex: 1; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; min-width: 40px; }
+.rm-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--term-dim), var(--term)); border-radius: 3px; transition: width .5s ease; }
+.rm-body { max-height: 0; overflow: hidden; transition: max-height .28s ease; }
+.rm-group.open .rm-body { max-height: 1200px; }
+.rm-blurb { color: var(--muted); font-size: 11px; padding: 2px 14px 8px; }
+.rm-item { display: flex; gap: 9px; align-items: baseline; padding: 5px 14px; font-size: 12.5px; color: var(--text); border-top: 1px solid rgba(var(--term-rgb), 0.06); }
+.rm-item:hover { background: rgba(var(--term-rgb), 0.04); }
+.rm-ico { flex: 0 0 auto; width: 14px; text-align: center; }
+.rm-item-done .rm-ico { color: var(--ok); }
+.rm-item-now { color: var(--term); }
+.rm-item-now .rm-ico { color: var(--term); }
+.rm-item-plan .rm-ico { color: var(--muted); }
+.rm-item-exp .rm-ico { color: var(--warn); }
+
+/* Live-mode ("broken mode", basic form) — the live ISO is a limited preview, so
+ * flag it and let locked controls read as deliberately disabled. The full
+ * glitch/fake-error aesthetic + a selectable "Broken" theme land in a later
+ * phase; this is just the limited-state cue + feature locks. */
+.live-badge { border-color: var(--warn) !important; color: var(--warn); letter-spacing: 0.08em; }
+body.live-mode .topbar { box-shadow: inset 0 -2px 0 rgba(255, 210, 59, 0.22); }
+body.live-mode button:disabled,
+body.live-mode input:disabled { opacity: .35; }
+
+/* ---- Page help (collapsible "what is this?" explainers) ---- */
+.page-help {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--panel); margin: 0 0 16px; padding: 0 12px;
+}
+.page-help > summary {
+    cursor: pointer; padding: 9px 4px; color: var(--term-dim);
+    font-size: 13px; letter-spacing: 0.03em; list-style: none;
+}
+.page-help > summary::before { content: 'ⓘ '; color: var(--term); }
+.page-help > summary:hover { color: var(--term); }
+.page-help[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.page-help p { margin: 0 0 8px; font-size: 13px; opacity: 0.85; }
+.page-help code { color: var(--term); }
+
+/* ---- Sign-in / lock screen (Phase 3c) ---- */
+#signin {
+    position: fixed; inset: 0; z-index: 10000; display: none;
+    align-items: center; justify-content: center;
+    background: radial-gradient(circle at 50% 32%, #0a140a, var(--bg));
+}
+.signin-card { text-align: center; width: 320px; max-width: 90vw; }
+.signin-logo { font-size: 46px; color: var(--term); filter: drop-shadow(0 0 10px rgba(var(--term-rgb), 0.6)); }
+.signin-title { letter-spacing: 0.3em; color: var(--term); margin: 6px 0 2px; font-weight: 700; }
+.signin-user { color: var(--text); opacity: 0.8; margin-bottom: 22px; }
+.pin-dots { display: flex; gap: 16px; justify-content: center; margin: 8px 0 20px; }
+.pin-dots span { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--term-dim); transition: background .1s; }
+.pin-dots span.filled { background: var(--term); border-color: var(--term); box-shadow: 0 0 8px rgba(var(--term-rgb), 0.7); }
+.pin-pad { display: grid; grid-template-columns: repeat(3, 70px); gap: 12px; justify-content: center; }
+.pin-pad button {
+    width: 70px; height: 70px; border-radius: 50%; font-size: 23px; padding: 0;
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+}
+.pin-pad button:hover { background: rgba(var(--term-rgb), 0.10); color: var(--term); border-color: var(--term-dim); }
+.pin-pad button:active { background: var(--term); color: #001400; }
+.pin-pad span { display: inline-block; }
+#signin-pw-mode { display: flex; flex-direction: column; gap: 12px; }
+#signin-pw-mode input { text-align: center; font-size: 16px; }
+.signin-link { display: inline-block; margin-top: 16px; color: var(--term-dim); font-size: 13px; text-decoration: none; }
+.signin-link:hover { color: var(--term); }
+.signin-msg { margin-top: 14px; color: var(--warn); min-height: 18px; font-size: 13px; }
+
+/* ===========================================================================
+ * Themed scrollbars — every scrollable surface in the shell wears the OS
+ * identity instead of the stock grey widgets. Uses the palette variables, so
+ * Green Phosphor and Gold Gunmetal both recolor automatically. (Apps, games
+ * and browsers draw their own scrollbars — this only covers the OS shell.)
+ * ======================================================================== */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 5px;
+    border: 2px solid var(--bg);   /* inset look — thumb floats in the track */
+}
+::-webkit-scrollbar-thumb:hover { background: var(--term-dim); }
+::-webkit-scrollbar-thumb:active { background: var(--term); }
+::-webkit-scrollbar-corner { background: var(--bg); }
+
+/* ---- Custom dropdowns (replace native <select>; no-WM safe) ---- */
+.cselect { position: relative; display: inline-block; vertical-align: middle; }
+.cselect-btn {
+    width: 100%; text-align: left; text-transform: none; letter-spacing: 0;
+    background: #000; color: var(--term); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 10px 30px 10px 12px;
+}
+.cselect-btn::after {
+    content: '▾'; position: absolute; right: 11px; top: 50%;
+    transform: translateY(-50%); color: var(--term-dim); pointer-events: none;
+}
+.cselect.open .cselect-btn { border-color: var(--term); }
+.cselect.open .cselect-btn::after { content: '▴'; color: var(--term); }
+.cselect-list {
+    position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 60;
+    background: var(--panel-2); border: 1px solid var(--term-dim);
+    border-radius: var(--radius); max-height: 260px; overflow-y: auto;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+}
+.cselect-opt { padding: 9px 12px; cursor: pointer; white-space: nowrap; color: var(--text); }
+.cselect-opt:hover { background: rgba(var(--term-rgb), 0.10); color: var(--term); }
+.cselect-opt.active { color: var(--term); border-left: 2px solid var(--term); padding-left: 10px; }
+
+/* ---- Network & Wi-Fi (Settings card + topbar offline pill) ---- */
+.offline-pill {
+    border-color: var(--warn) !important; color: var(--warn);
+    background: rgba(255, 210, 59, 0.06); letter-spacing: 0.06em;
+    text-transform: none; padding: 2px 10px; cursor: pointer;
+}
+.offline-pill:hover { background: var(--warn); color: #141000; }
+.ok-text   { color: var(--ok); }
+.warn-text { color: var(--warn); }
+.wifi-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+/* QoL — hint before the first scan (vanishes once the list has rows). */
+.wifi-list:empty::before { content: "Press “Scan for Wi-Fi” to see nearby networks."; color: var(--term-dim); padding: 8px 2px; font-style: italic; }
+.wifi-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--panel);
+}
+.wifi-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wifi-meta { color: var(--term-dim); font-size: 12px; flex: 0 0 auto; }
+.wifi-join { padding: 5px 12px; flex: 0 0 auto; }
+.wifi-pwform {
+    display: flex; gap: 8px; padding: 8px 10px 10px 24px;
+    border-left: 2px solid var(--term-dim); margin: 2px 0 4px 10px;
+}
+.wifi-pwform input { flex: 1; }
+.wifi-pwform button { flex: 0 0 auto; }
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+    font-size: 14px; line-height: 1.5; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Optional retro effects (off by default) */
+body.glow, body.glow .mono { text-shadow: 0 0 4px rgba(var(--term-rgb), 0.45); }
+body.crt::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px, transparent 2px, transparent 3px);
+    mix-blend-mode: multiply;
+}
+body.crt .screen { animation: crtflicker 6s linear infinite; }
+@keyframes crtflicker { 0%,100% { opacity: 1; } 7% { opacity: 0.92; } 8% { opacity: 1; } 52% { opacity: 0.96; } }
+
+button {
+    background: rgba(var(--term-rgb), 0.04); color: var(--term);
+    border: 1px solid var(--term-dim); border-radius: var(--radius);
+    padding: 9px 14px; font: inherit; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.04em; transition: background .12s, color .12s, border-color .12s;
+}
+button:hover { background: var(--term); color: #001400; }
+button:active:not(:disabled) { transform: translateY(1px); }   /* tactile press feedback */
+button:focus-visible { outline: 2px solid var(--term); outline-offset: 2px; }
+button.danger { border-color: var(--danger); color: var(--danger); }
+button.danger:hover { background: var(--danger); color: #150000; }
+button.primary { background: var(--term); color: #001400; border-color: var(--term); font-weight: 700; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+
+input, textarea, select {
+    background: #000; color: var(--term); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 10px 12px; font: inherit; width: 100%;
+}
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--term); }
+/* Range sliders (volume) get a visible keyboard-focus ring like buttons do. */
+input[type="range"]:focus-visible { outline: 2px solid var(--term); outline-offset: 2px; }
+
+.mono { font-family: inherit; }
+.dim { color: var(--term-dim); }
+.muted { opacity: .7; }
+.right { text-align: right; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+/* A .row's flex display would otherwise beat the UA's [hidden] rule. */
+.row[hidden] { display: none; }
+/* PIN form (Settings → Security). Was an inline display:flex, which silently
+   beat the [hidden] attribute and left the form permanently expanded. */
+#pin-form { display: flex; flex-direction: column; gap: 8px; max-width: 320px; margin-top: 8px; }
+#pin-form[hidden] { display: none; }
+.spacer { flex: 1; }
+h2, h3 { color: var(--term); font-weight: 600; letter-spacing: .05em; margin: 0 0 12px; }
+h3 { font-size: 13px; text-transform: uppercase; color: var(--term-dim); }
+
+/* ---- Layout ---- */
+#app { display: none; height: 100vh; grid-template-columns: 210px 1fr; grid-template-rows: 44px 1fr; }
+#app.ready { display: grid; }
+
+.topbar {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 14px;
+    padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel);
+    font-size: 12px; letter-spacing: .06em;
+}
+.topbar .brand { color: var(--term); font-weight: 700; }
+.topbar .stat { color: var(--term-dim); }
+.topbar .pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+
+.sidebar { border-right: 1px solid var(--line); background: var(--panel); padding: 10px 8px; overflow-y: auto; }
+.nav-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    text-transform: none; letter-spacing: 0; border: 1px solid transparent; background: transparent;
+    color: var(--text); padding: 9px 10px; margin-bottom: 2px; border-radius: var(--radius);
+    position: relative;   /* C7 — anchor the unread-notification dot */
+}
+.nav-item:hover { background: rgba(var(--term-rgb),0.06); color: var(--term); }
+.nav-item.active { background: rgba(var(--term-rgb),0.10); border-color: var(--term-dim); color: var(--term); }
+.nav-item .ico { width: 18px; text-align: center; }
+/* C7 — pulsing dot when a background event (AI reply, etc.) needs attention. */
+.nav-item.has-unread::after {
+    content: ""; position: absolute; top: 7px; right: 8px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--warn); box-shadow: 0 0 6px var(--warn);
+    animation: unread-pulse 1.6s ease-in-out infinite;
+}
+.reduce-motion .nav-item.has-unread::after { animation: none; }
+@keyframes unread-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.content { overflow: auto; padding: 18px 22px; }
+.screen { display: none; }
+.screen.active { display: block; animation: fade .15s ease; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+.card { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 16px;
+    /* Subtle depth — a faint accent top-highlight + a soft drop shadow. Static
+       (no blur filter / no animation) so it's cheap on low-end GPUs, and recolors
+       with the theme via --term-rgb. */
+    box-shadow: 0 1px 0 rgba(var(--term-rgb), 0.05) inset, 0 6px 18px rgba(0, 0, 0, 0.28); }
+.grid { display: grid; gap: 12px; }
+.grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.grid.apps { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+
+/* Phase 5 — Task Manager process table */
+.proc-wrap { max-height: 440px; overflow: auto; }
+.proc { width: 100%; border-collapse: collapse; font-size: 13px; }
+.proc th, .proc td { padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.proc th { text-align: left; color: var(--term-dim); font-weight: 600;
+    position: sticky; top: 0; background: var(--panel-2); z-index: 1; }
+.proc th.right, .proc td.right { text-align: right; }
+.proc th[data-sort] { cursor: pointer; user-select: none; }
+.proc th[data-sort]:hover { color: var(--term); }
+.proc th[data-sort].sorted::after { content: ' ▾'; opacity: 0.85; }
+.proc th[data-sort].sorted.asc::after { content: ' ▴'; }
+.proc tbody tr { cursor: pointer; }
+.proc tbody tr:hover { background: rgba(var(--term-rgb), 0.06); }
+.proc tbody tr.sel { background: rgba(var(--term-rgb), 0.14); color: var(--term); }
+
+/* Phase 6 — Help database */
+.help-cat { margin: 18px 0 8px; color: var(--term); font-size: 14px; letter-spacing: .04em; text-transform: uppercase; }
+.help-cat:first-child { margin-top: 2px; }
+.help-topic { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); margin-bottom: 8px; padding: 10px 12px; }
+.help-topic > summary { cursor: pointer; font-weight: 600; list-style: none; }
+.help-topic > summary::-webkit-details-marker { display: none; }
+.help-topic > summary::before { content: '▸ '; color: var(--term-dim); }
+.help-topic[open] > summary::before { content: '▾ '; }
+.help-topic[open] > summary { color: var(--term); border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 8px; }
+.help-body { line-height: 1.55; }
+.help-body p, .help-body ul, .help-body ol { margin: 6px 0; }
+
+/* Phase 6 — first-boot Quickstart tour */
+.qs-overlay { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center;
+    justify-content: center; background: rgba(0, 0, 0, 0.78); }
+.qs-card { width: 460px; max-width: 92vw; background: var(--panel); border: 1px solid var(--term-dim);
+    border-radius: var(--radius); padding: 24px; box-shadow: 0 0 40px rgba(var(--term-rgb), 0.18);
+    text-align: center; }
+.qs-step-ico { font-size: 40px; color: var(--term); filter: drop-shadow(0 0 10px rgba(var(--term-rgb), 0.5)); margin-bottom: 6px; }
+.qs-card h2 { margin: 4px 0 10px; }
+.qs-body { text-align: left; line-height: 1.55; min-height: 90px; }
+.qs-body b { color: var(--term); }
+.qs-dots { display: flex; gap: 6px; justify-content: center; margin: 16px 0; }
+.qs-dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.qs-dots span.on { background: var(--term); box-shadow: 0 0 6px rgba(var(--term-rgb), 0.7); }
+.qs-actions { display: flex; align-items: center; gap: 8px; }
+
+.tile {
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+    padding: 16px; text-transform: none; letter-spacing: 0; text-align: left;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+}
+.tile:hover { background: rgba(var(--term-rgb),0.08); color: var(--term); border-color: var(--term-dim); }
+.tile .t-ico { font-size: 22px; }
+.tile .t-label { font-weight: 600; }
+.tile .t-sub { font-size: 11px; opacity: .6; }
+
+/* ---- Chip (Apps filter pills) ---- */
+.chip {
+    padding: 4px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    text-transform: uppercase;
+}
+.chip:hover { border-color: var(--term-dim); color: var(--term); }
+.chip.active {
+    background: var(--term-dim);
+    color: var(--bg);
+    border-color: var(--term);
+}
+
+/* ============================================================================
+   System Core (SC1)
+   ----------------------------------------------------------------------------
+   Layered SVG rings + center mark, all animated via `transform` and `opacity`
+   only — the cheapest possible CSS animations (compositor-only, no layout, no
+   paint). Animations are PAUSED by default; only run when the screen has the
+   `.is-active` class, which `syscore.js` adds when something is actually
+   happening (Cold-mode line, AI speaking, diagnostic running).
+
+   Idle state = static still image. Hidden state (.screen NOT .active) = `display:none`,
+   so the browser doesn't tick anything at all.
+   ============================================================================ */
+
+.syscore-header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 18px;
+}
+.syscore-header h2 {
+    margin: 0;
+    color: var(--term);
+    letter-spacing: 6px;
+    font-weight: 600;
+}
+.syscore-mode {
+    color: var(--term-dim);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+.syscore-tier {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    padding: 2px 8px;
+    cursor: default;
+}
+.sc-tier-free    { color: var(--ok); }
+.sc-tier-lean    { color: var(--warn); }
+.sc-tier-minimal { color: var(--danger); }
+
+/* Live-ISO welcome card — prominent on the Dashboard until dismissed. */
+.live-welcome {
+    border: 1px solid var(--term);
+    background:
+        radial-gradient(circle at 30% 20%, rgba(var(--term-rgb), 0.06), transparent 60%),
+        var(--panel);
+}
+.live-welcome h2 {
+    color: var(--term);
+    letter-spacing: 1px;
+    margin: 0 0 4px;
+}
+
+/* SC6 — Live mode toggle in the header. Bright green when active so a
+   glance at the header tells the user whether prompts go to LM Studio. */
+.syscore-mode-toggle {
+    background: transparent;
+    border: 1px solid var(--term-dim);
+    color: var(--term-dim);
+    padding: 3px 12px;
+    border-radius: 3px;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+.syscore-mode-toggle:hover { border-color: var(--term); color: var(--term); }
+.syscore-mode-toggle.live {
+    background: var(--term-dim);
+    color: var(--bg);
+    border-color: var(--term);
+}
+.syscore-mode-toggle:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* SC6 — Input row beneath the bubble. Same dystopian palette; flex layout
+   so the Send button doesn't push the page width. */
+.core-input {
+    margin: 12px auto 0;
+    max-width: 640px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.core-input input[type="text"] {
+    flex: 1;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--term);
+    padding: 6px 10px;
+    font-size: 13px;
+    border-radius: 3px;
+    font-family: inherit;
+}
+.core-input input[type="text"]:focus {
+    outline: none;
+    border-color: var(--term);
+}
+.core-input button {
+    background: var(--panel-2);
+    border: 1px solid var(--term-dim);
+    color: var(--term);
+    padding: 6px 14px;
+    border-radius: 3px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+.core-input button:hover:not(:disabled) {
+    border-color: var(--term);
+    background: rgba(var(--term-rgb), 0.06);
+}
+.core-input button:disabled { opacity: 0.4; cursor: not-allowed; }
+#core-input-reset {
+    border-color: var(--line);
+    color: var(--term-dim);
+}
+/* When the user is in emergency mode (lean/minimal manually pinned OR auto
+   detected low VRAM), suppress the spin/pulse animations entirely. This sits
+   on top of SC1's .is-active gate, so .core-suppressed always wins. */
+#screen-syscore.core-suppressed .core-ring,
+#screen-syscore.core-suppressed .core-aura,
+#screen-syscore.core-suppressed .core-mark {
+    animation-play-state: paused !important;
+}
+
+.core-stage {
+    position: relative;
+    width: 360px;
+    height: 360px;
+    margin: 8px auto 0;
+}
+.core-stage > svg,
+.core-stage > .core-aura {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    will-change: transform, opacity;
+    animation-play-state: paused;  /* Default — only runs when the parent has .is-active */
+}
+
+/* The three rotating rings + a soft aura behind them */
+.core-ring.outer  { animation: core-spin     12s linear infinite;          opacity: 0.85; }
+.core-ring.middle { animation: core-spin      7s linear infinite reverse;  opacity: 0.70; }
+.core-ring.inner  { animation: core-pulse     4s ease-in-out infinite;     opacity: 0.55; }
+.core-aura {
+    background: radial-gradient(circle at center,
+        rgba(var(--term-rgb), 0.10) 0%,
+        rgba(var(--term-rgb), 0.04) 40%,
+        transparent 70%);
+    animation: core-pulse 4s ease-in-out infinite;
+    opacity: 0.5;
+}
+.core-mark {
+    position: absolute;
+    inset: 0;
+    width: 28%;
+    height: 28%;
+    margin: auto;
+    z-index: 2;
+    color: var(--term);
+    filter: drop-shadow(0 0 6px rgba(var(--term-rgb), 0.6));
+    animation: core-pulse 4s ease-in-out infinite;
+    animation-play-state: paused;
+    will-change: opacity, filter;
+}
+
+/* Animations only run while the user is *looking at* an active core */
+#screen-syscore.is-active .core-ring,
+#screen-syscore.is-active .core-aura,
+#screen-syscore.is-active .core-mark {
+    animation-play-state: running;
+}
+
+/* State modifiers — amplify specific layers depending on what the core is doing.
+   These are still cheap (animation-duration and filter changes only). */
+#screen-syscore.is-listening .core-ring.inner { animation-duration: 1.6s; opacity: 0.85; }
+#screen-syscore.is-listening .core-mark { filter: drop-shadow(0 0 12px rgba(var(--term-rgb), 0.85)); }
+#screen-syscore.is-speaking  .core-ring.inner { animation-duration: 0.9s; opacity: 1.0; }
+#screen-syscore.is-speaking  .core-mark { filter: drop-shadow(0 0 18px rgba(var(--term-rgb), 1.0)); }
+#screen-syscore.is-working   .core-ring.outer { animation-duration: 3.5s; opacity: 1.0; }
+#screen-syscore.is-working   .core-ring.middle { animation-duration: 2.2s; }
+
+/* Bubble — appears below the core with a quick fade. JS sets/clears `.show`. */
+.core-bubble {
+    margin: 18px auto 0;
+    min-height: 24px;
+    max-width: 640px;
+    text-align: center;
+    color: var(--term);
+    font-size: 13px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 6px 14px;
+    border-left: 2px solid var(--term);
+    border-right: 2px solid var(--term);
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 220ms ease, transform 220ms ease;
+}
+.core-bubble.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Readouts grid (SC2 will populate). Empty placeholders shown dimmed in SC1. */
+.core-readouts {
+    margin: 28px auto 0;
+    max-width: 920px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+}
+.core-readout {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+}
+.core-readout .label {
+    color: var(--term-dim);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+.core-readout .value {
+    margin-top: 4px;
+    color: var(--term);
+    font-size: 18px;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+.core-readout.empty { opacity: 0.35; }
+.core-readout.empty .value { color: var(--term-dim); }
+.core-readout .sub {
+    margin-top: 2px;
+    color: var(--term-dim);
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+/* SC2 — brief flash when a poll lands. Animates background only (no layout),
+   one-shot. The 'fresh' class is added on value change and removed by JS. */
+.core-readout.fresh {
+    animation: core-readout-flash 600ms ease-out;
+}
+@keyframes core-readout-flash {
+    0%   { background-color: rgba(var(--term-rgb), 0.22); }
+    100% { background-color: var(--panel-2); }
+}
+
+/* SC2 — inventory card (static system catalogue, populated once per visit). */
+.syscore-subhead {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.syscore-subhead h3 {
+    margin: 0;
+    color: var(--term);
+    letter-spacing: 4px;
+    font-weight: 600;
+    font-size: 14px;
+}
+.core-inventory {
+    margin: 28px auto 0;
+    max-width: 920px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+}
+
+/* P2 — System Control quick-actions card */
+.core-control {
+    margin: 16px auto 0;
+    max-width: 920px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+}
+.sc-control-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+    margin-top: 8px;
+}
+.sc-control-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    text-align: left;
+    padding: 12px 14px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s, transform 0.12s;
+}
+.sc-control-btn:hover {
+    border-color: var(--term);
+    background: var(--panel-2);
+    transform: translateY(-1px);
+}
+/* C14 — flag the Report button when the error log has entries. */
+.sc-control-btn.has-issues { border-color: var(--warn); }
+.sc-control-btn.has-issues .sc-ctl-ico { color: var(--warn); }
+.sc-ctl-ico { font-size: 18px; color: var(--term); }
+.sc-ctl-label { font-weight: 700; }
+.sc-ctl-sub { font-size: 12px; color: var(--term-dim); }
+.inv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 6px 24px;
+}
+.inv-grid > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(20, 61, 13, 0.5);
+    gap: 12px;
+    min-width: 0;
+}
+.inv-label {
+    color: var(--term-dim);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+.inv-value {
+    color: var(--text);
+    font-size: 12px;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* Status pips for AppArmor / firewall — green/amber/red without altering
+   layout. The JS adds one of these classes via _styleStatus(). */
+.inv-value.status-ok   { color: var(--ok); }
+.inv-value.status-warn { color: var(--warn); }
+.inv-value.status-bad  { color: var(--danger); }
+
+/* SC3 — Diagnostics card. Same "core" panel idiom as Inventory, plus a
+   button row, a slim progress bar (scaleX-only animation), and result rows
+   colored by status. The bar uses transform on a child span so growing it
+   never invalidates layout. */
+.core-diagnostics {
+    margin: 28px auto 0;
+    max-width: 920px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+}
+.diag-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.diag-controls button[data-diag-profile] {
+    background: var(--panel);
+    border: 1px solid var(--term-dim);
+    color: var(--term);
+    padding: 6px 14px;
+    border-radius: 4px;
+    letter-spacing: 1.5px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.diag-controls button[data-diag-profile]:hover:not(:disabled) {
+    border-color: var(--term);
+    background: rgba(var(--term-rgb), 0.06);
+}
+.diag-controls button[data-diag-profile]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.diag-controls .spacer { flex: 1; }
+#diag-cancel {
+    background: transparent;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+}
+#diag-cancel:hover { background: rgba(255, 59, 59, 0.08); }
+
+.diag-progress { margin: 10px 0 14px; }
+.diag-bar-track {
+    height: 4px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+#diag-bar {
+    display: block;
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, var(--term-dim), var(--term));
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform 220ms ease-out;
+    will-change: transform;
+}
+#diag-progress-msg { font-size: 11px; }
+
+/* Result rows. Left-border color encodes status without changing layout. */
+.diag-results { margin-top: 4px; }
+.diag-row {
+    border-left: 3px solid var(--line);
+    padding: 8px 12px;
+    margin-bottom: 4px;
+    background: rgba(20, 61, 13, 0.12);
+    border-radius: 0 4px 4px 0;
+}
+.diag-row.diag-pass      { border-left-color: var(--ok); }
+.diag-row.diag-warn      { border-left-color: var(--warn); }
+.diag-row.diag-fail      { border-left-color: var(--danger); }
+.diag-row.diag-skip      { border-left-color: var(--term-dim); opacity: 0.65; }
+.diag-row.diag-cancelled { border-left-color: var(--warn); opacity: 0.7; }
+.diag-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+.diag-pip {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+.diag-pass .diag-pip      { color: var(--ok); }
+.diag-warn .diag-pip      { color: var(--warn); }
+.diag-fail .diag-pip      { color: var(--danger); }
+.diag-skip .diag-pip      { color: var(--term-dim); }
+.diag-cancelled .diag-pip { color: var(--warn); }
+.diag-name {
+    flex: 1;
+    color: var(--text);
+    font-size: 12px;
+}
+.diag-status {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+.diag-pass .diag-status      { color: var(--ok); }
+.diag-warn .diag-status      { color: var(--warn); }
+.diag-fail .diag-status      { color: var(--danger); }
+.diag-skip .diag-status      { color: var(--term-dim); }
+.diag-cancelled .diag-status { color: var(--warn); }
+.diag-dur {
+    font-size: 10px;
+    color: var(--term-dim);
+    font-family: 'JetBrains Mono', monospace;
+}
+.diag-detail {
+    margin-top: 4px;
+    color: var(--text);
+    font-size: 11px;
+    opacity: 0.85;
+}
+.diag-hint {
+    margin-top: 4px;
+    color: var(--term-dim);
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+.diag-history,
+.diag-schedule {
+    margin-top: 12px;
+    border-top: 1px dashed var(--line);
+    padding-top: 8px;
+}
+.diag-history summary,
+.diag-schedule summary {
+    cursor: pointer;
+    color: var(--term-dim);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+}
+
+/* SC4 — schedule rows. Flex layout so meta + info + actions stay on one
+   line on a typical desktop, wrapping cleanly on narrow viewports. */
+.diag-sched-rows {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.diag-sched-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 12px;
+    background: rgba(20, 61, 13, 0.10);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+}
+.diag-sched-label  { flex: 1 1 200px; min-width: 0; }
+.diag-sched-name   { color: var(--text); font-size: 12px; }
+.diag-sched-meta   { font-size: 10px; letter-spacing: 1px; margin-top: 2px; }
+.diag-sched-info   { flex: 1 1 220px; min-width: 0; }
+.diag-sched-info > div { font-size: 10px; letter-spacing: 1px; }
+.diag-sched-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+.diag-sched-runnow {
+    background: transparent;
+    border: 1px solid var(--term-dim);
+    color: var(--term);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    cursor: pointer;
+}
+.diag-sched-runnow:hover:not(:disabled) {
+    border-color: var(--term);
+    background: rgba(var(--term-rgb), 0.06);
+}
+.diag-sched-runnow:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.core-footer {
+    margin: 24px auto 0;
+    max-width: 920px;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+/* Reduced-motion preference — strip animations entirely. The core still shows,
+   just doesn't move. */
+@media (prefers-reduced-motion: reduce) {
+    .core-ring, .core-mark, .core-aura { animation: none !important; }
+}
+
+@keyframes core-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+@keyframes core-pulse {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 1.0; }
+}
+
+/* ---- Boot screen ---- */
+#boot { position: fixed; inset: 0; background: #050705; padding: 28px; display: flex; flex-direction: column; overflow: hidden; color: #33ff00; }
+/* Phase 8 — the boot sequence is ALWAYS green + CRT, a fixed identity moment,
+   regardless of the chosen desktop theme. */
+#boot .log { white-space: pre-wrap; line-height: 1.6; font-size: 14px; color: #33ff00; flex: 1; position: relative; z-index: 1; overflow: hidden; }
+#boot .actions { display: flex; gap: 10px; position: relative; z-index: 4; }
+#boot::after {                              /* scanline overlay (non-interactive) */
+    content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+    background: repeating-linear-gradient(0deg,
+        rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,30,0,0.30) 3px, rgba(0,0,0,0) 4px);
+}
+.boot-sigil {                               /* holographic emblem, CRT warm-up */
+    position: absolute; top: 30%; left: 0; right: 0; text-align: center;
+    font-size: 132px; line-height: 1; color: #33ff00; pointer-events: none; z-index: 2;
+    opacity: 0; text-shadow: 0 0 18px rgba(51,255,0,0.65), 0 0 44px rgba(51,255,0,0.35);
+}
+.boot-sigil.warm { animation: boot-sigil-warm 3s ease-out forwards; }
+@keyframes boot-sigil-warm {
+    0% { opacity: 0; }   8% { opacity: .55; } 11% { opacity: .07; } 17% { opacity: .82; }
+    21% { opacity: .14; } 30% { opacity: 1; } 35% { opacity: .45; } 45% { opacity: 1; }
+    60% { opacity: .85; } 100% { opacity: .9; }
+}
+#boot .cursor { background: #33ff00; }
+.cursor { display: inline-block; width: 9px; height: 1.1em; background: var(--term); vertical-align: text-bottom; animation: blink 1s step-end infinite; }
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* ---- Files / Tasks / Terminal ---- */
+.fs-path { color: var(--term-dim); margin-bottom: 8px; word-break: break-all; }
+/* QoL — Files: quick-folder chips + clickable breadcrumb. */
+.fs-quick { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.fs-chip { padding: 4px 10px; font-size: 12px; border-radius: 999px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--muted, #8aa); }
+.fs-chip:hover { color: var(--term); border-color: var(--term-dim); }
+.fs-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.fs-crumbs .crumb { background: transparent; border: none; cursor: pointer; padding: 1px 4px;
+  border-radius: 4px; color: var(--term-dim); font: inherit; }
+.fs-crumbs .crumb:hover { color: var(--term); background: rgba(var(--term-rgb),0.08); }
+.fs-crumbs .crumb-sep { color: var(--muted, #678); opacity: .6; }
+.fs-list { display: flex; flex-direction: column; }
+.fs-row { display: flex; gap: 10px; padding: 6px 8px; border-radius: 4px; cursor: pointer; text-transform: none; letter-spacing: 0; text-align: left; background: transparent; border: none; color: var(--text); }
+.fs-row:hover { background: rgba(var(--term-rgb),0.07); color: var(--term); }
+.fs-row .sz { margin-left: auto; opacity: .5; font-size: 12px; }
+
+table.proc { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.proc th { text-align: left; color: var(--term-dim); border-bottom: 1px solid var(--line); padding: 6px 8px; }
+table.proc td { padding: 5px 8px; border-bottom: 1px solid rgba(20,61,13,0.4); }
+.bar { height: 10px; background: #001400; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--term); }
+
+#term-out { height: 60vh; resize: none; white-space: pre-wrap; background: #000; }
+.term-hint { font-size: 12px; margin: 6px 0; min-height: 18px; }
+.term-hint.warn { color: var(--warn); }
+
+/* ---- AI ---- */
+#ai-log { height: 56vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 6px; }
+/* QoL — friendly empty state (pure CSS, vanishes the moment a message arrives). */
+#ai-log:empty::before { content: "Ask me anything — or try \201Cinstall krita\201D, \201Ctune my settings\201D, or \201Copen apps\201D."; margin: auto; max-width: 420px; text-align: center; color: var(--term-dim); font-style: italic; line-height: 1.6; }
+.msg { max-width: 80%; padding: 10px 12px; border-radius: 10px; white-space: pre-wrap; position: relative; }
+.msg.user { align-self: flex-end; background: rgba(var(--term-rgb),0.12); border: 1px solid var(--term-dim); }
+.msg.ai { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); }
+.msg.sys { align-self: center; font-size: 12px; opacity: .7; }
+/* QoL — per-message Copy button on AI replies (hover-revealed). */
+.msg-copy { position: absolute; top: 4px; right: 4px; padding: 1px 6px; font-size: 12px;
+  line-height: 1.4; border-radius: 6px; background: var(--panel); border: 1px solid var(--line);
+  color: var(--muted, #8aa); cursor: pointer; opacity: 0; transition: opacity .12s ease; }
+.msg.ai:hover .msg-copy, .msg-copy:focus-visible { opacity: 0.85; }
+.msg-copy:hover { opacity: 1; color: var(--text); }
+/* QoL — starter prompt chips in an empty AI chat. */
+.starter-chips { display: flex; flex-wrap: wrap; gap: 6px; align-self: flex-start; margin: 2px 0 4px; }
+.starter-chip { padding: 5px 11px; font-size: 12px; border-radius: 999px; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--muted, #8aa); }
+.starter-chip:hover { color: var(--text); border-color: var(--term-dim); }
+/* C10 — animated "typing" dots while the AI is thinking. */
+.msg.ai.thinking { display: inline-flex; gap: 5px; align-items: center; }
+.msg.ai.thinking .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--term);
+    opacity: 0.35; animation: think-bounce 1.2s infinite ease-in-out; }
+.msg.ai.thinking .dot:nth-child(2) { animation-delay: 0.18s; }
+.msg.ai.thinking .dot:nth-child(3) { animation-delay: 0.36s; }
+@keyframes think-bounce { 0%, 80%, 100% { opacity: 0.35; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-3px); } }
+.reduce-motion .msg.ai.thinking .dot { animation: none; opacity: 0.6; }
+
+/* ---- Calculator ---- */
+.calc { max-width: 360px; }
+#calc-display { font-size: 30px; text-align: right; }
+.calc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+.calc-grid button { padding: 16px 0; font-size: 18px; }
+
+/* ---- Toggles ---- */
+.setting { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(20,61,13,0.4); }
+.setting:last-child { border-bottom: none; }
+.setting .label { display: flex; flex-direction: column; }
+.setting .label small { opacity: .6; }
+.switch { position: relative; width: 48px; height: 24px; flex: none; }
+/* Visually hidden but FOCUSABLE — display:none made every toggle switch
+   unreachable by keyboard (no Tab stop, no Space to flip). */
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; cursor: pointer; }
+.switch input:focus-visible + .track { outline: 2px solid var(--term); outline-offset: 2px; }
+.switch .track { position: absolute; inset: 0; background: #001400; border: 1px solid var(--line); border-radius: 999px; transition: .15s; }
+.switch .track::before { content: ""; position: absolute; width: 18px; height: 18px; left: 2px; top: 2px; background: var(--term-dim); border-radius: 50%; transition: .15s; }
+.switch input:checked + .track { border-color: var(--term); }
+.switch input:checked + .track::before { left: 26px; background: var(--term); }
+
+/* ---- Modal ---- */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; z-index: 1000; }
+.modal-bg.show { display: flex; }
+.modal { width: min(560px, 92vw); background: var(--panel); border: 1px solid var(--term-dim); border-radius: 8px; padding: 20px; }
+.modal.danger { border-color: var(--danger); }
+.modal h3 { color: var(--term); }
+.modal.danger h3 { color: var(--danger); }
+.modal pre { background: #000; border: 1px solid var(--line); padding: 10px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; max-height: 30vh; overflow: auto; }
+.modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+
+/* ---- Toast ---- */
+#toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--term-dim); color: var(--term); padding: 10px 16px; border-radius: 6px; opacity: 0; transition: opacity .2s; z-index: 1100; pointer-events: none; }
+#toast.show { opacity: 1; }
+/* Round-2 QOL — volume slider popover (anchored under the topbar). */
+#volume-popover {
+    position: fixed; top: 46px; right: 14px; z-index: 1100;
+    background: var(--panel); border: 1px solid var(--term-dim); border-radius: 8px;
+    padding: 10px 12px; min-width: 220px; box-shadow: 0 6px 22px rgba(0,0,0,0.5);
+}
+#volume-popover[hidden] { display: none; }
+#stat-volume { cursor: pointer; }
+/* QOL — output-device buttons inside the volume popover. */
+#vol-sinks[hidden] { display: none; }
+#vol-sinks .vol-sink-btn {
+    display: block; width: 100%; text-align: left; margin-top: 4px;
+    padding: 6px 9px; font-size: 12px; text-transform: none; letter-spacing: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#vol-sinks .vol-sink-btn.on { border-color: var(--term); color: var(--term); }
+/* QOL — screen-recording indicator (topbar). Blinks gently; reduce-motion
+   stills it via the global animation kill. */
+#rec-pill { color: var(--danger); border-color: var(--danger); cursor: pointer; animation: rec-blink 1.6s steps(2) infinite; }
+#rec-pill[hidden] { display: none; }
+@keyframes rec-blink { 50% { opacity: .55; } }
+/* QOL — "Forget" affordance on saved Wi-Fi rows (quiet until hovered). */
+.wifi-forget { padding: 6px 10px; font-size: 11px; border-color: var(--line); color: var(--term-dim); }
+.wifi-forget:hover { border-color: var(--danger); color: var(--danger); background: transparent; }
+
+/* QOL batch — quick-settings + calendar popovers (same anchor as the volume one). */
+#quick-popover, #cal-popover {
+    position: fixed; top: 46px; right: 14px; z-index: 1100;
+    background: var(--panel); border: 1px solid var(--term-dim); border-radius: 8px;
+    padding: 12px; width: 300px; box-shadow: 0 6px 22px rgba(0,0,0,0.5);
+}
+#quick-popover[hidden], #cal-popover[hidden] { display: none; }
+.qk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.qk-tile {
+    display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+    padding: 10px 11px; font-size: 12px; text-transform: none; letter-spacing: 0;
+}
+.qk-tile.on { background: var(--term); color: #001400; border-color: var(--term); }
+.qk-tile.on:hover { background: var(--term); color: #001400; }
+#stat-clock { cursor: pointer; font: inherit; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; font-size: 12px; }
+.cal-grid .cal-dow { color: var(--term-dim); padding: 3px 0; }
+.cal-grid .cal-day { padding: 5px 0; border-radius: 4px; }
+.cal-grid .cal-day.other { opacity: .3; }
+.cal-grid .cal-day.today { background: var(--term); color: #001400; font-weight: 700; }
+
+/* QOL batch — command palette (Ctrl+Space). */
+#palette {
+    position: fixed; inset: 0; z-index: 1200; background: rgba(0, 0, 0, 0.55);
+    display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh;
+}
+#palette[hidden] { display: none; }
+.pal-card {
+    width: 580px; max-width: 92vw; background: var(--panel);
+    border: 1px solid var(--term-dim); border-radius: 8px; overflow: hidden;
+    box-shadow: 0 10px 34px rgba(0,0,0,0.6);
+}
+#pal-input { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 13px 14px; font-size: 15px; }
+#pal-input:focus { border-color: var(--term-dim); }
+#pal-list { max-height: 46vh; overflow: auto; }
+.pal-item { padding: 9px 14px; cursor: pointer; display: flex; gap: 10px; align-items: baseline; }
+.pal-item .pal-kind { font-size: 10px; color: var(--term-dim); text-transform: uppercase; letter-spacing: .06em; min-width: 58px; }
+.pal-item.sel, .pal-item:hover { background: rgba(var(--term-rgb), 0.12); }
+.pal-item.sel { border-left: 3px solid var(--term); padding-left: 11px; }
+.pal-empty { padding: 14px; color: var(--term-dim); }
+
+/* C11 — offline/airplane state surfaces via the topbar #offline-pill (driven by
+   updateOnlineStatus + refreshNetStatus); no separate badge. */
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); }
+.badge.on { color: var(--ok); border-color: var(--term-dim); }
+.badge.off { color: var(--term-dim); }

@@ -1,0 +1,8 @@
+{
+  "name": "outlaw-installer-gui",
+  "version": "1.0.0",
+  "description": "Outlaw OS graphical installer — point-and-click front-end over outlaw-install",
+  "main": "main.js",
+  "author": "Outlaw OS",
+  "license": "SEE LICENSE IN LICENSE"
+}

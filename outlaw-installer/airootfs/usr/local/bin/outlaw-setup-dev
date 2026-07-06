@@ -1,0 +1,77 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-setup-dev — download + build the Dev session (Outlaw CodeMaker) Python
+# environment on demand.
+# ----------------------------------------------------------------------------
+# The live ISO ships CodeMaker's *code* at /opt/outlaw-codemaker but NOT its
+# Python venv (PyQt6 + friends), because that's heavy and is normally built
+# during a full install. So on the live ISO the Dev session can't start. This
+# script lets a live user (or a repair on an installed system) fetch everything
+# needed and build the venv, mirroring what outlaw-install does post-install.
+#
+# Heavy: downloads PyQt6 / OpenCV / NumPy wheels. On the LIVE ISO these land in
+# RAM (the tmpfs overlay), so it needs a few GB free + a working network. On an
+# installed system it just (re)builds the venv on disk.
+#
+# Designed to be run inside a terminal (outlaw-term gives it focus + keeps the
+# window open). Re-execs itself via sudo so the privileged steps just work.
+# ============================================================================
+set -uo pipefail
+
+CM=/opt/outlaw-codemaker
+hr() { printf '%s\n' "------------------------------------------------------------"; }
+
+[[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+
+hr
+echo "  Outlaw OS — set up the Dev session (Outlaw CodeMaker)"
+hr
+echo
+
+if [[ ! -f "$CM/main.py" ]]; then
+    echo "ERROR: Outlaw CodeMaker isn't bundled at $CM — cannot set up the Dev session."
+    exit 1
+fi
+
+REQS="$CM/requirements-linux.txt"
+[[ -f "$REQS" ]] || REQS="$CM/requirements.txt"
+[[ -f "$REQS" ]] || { echo "ERROR: no requirements file found in $CM."; exit 1; }
+
+echo "[1/3] Installing system packages (python + input/OCR backends)…"
+# ⚠ BOOT-SAFETY: `-Sy <pkg>` (refresh, then install without upgrading the rest) is
+# a partial upgrade — on Arch the #1 way to break a running system (a dependency
+# soname bump can leave the desktop unable to start). On a persistent installed
+# system do a FULL upgrade (-Syu) so the library set stays coherent. On the live
+# ISO the system is ephemeral (RAM overlay), so -Sy is correct and a full upgrade
+# would try to upgrade the entire live system in RAM (huge, pointless).
+if [[ -d /run/archiso ]]; then
+    PAC_OP=(-Sy --needed --noconfirm)
+else
+    PAC_OP=(-Syu --needed --noconfirm)
+fi
+pacman "${PAC_OP[@]}" \
+    python xdotool scrot tesseract tesseract-data-eng \
+  || { echo; echo "ERROR: package download failed — check your network connection and try again."; exit 1; }
+
+echo
+echo "[2/3] Building the Python environment at $CM/.venv …"
+echo "      (downloading PyQt6 + dependencies — this can take several minutes)"
+python -m venv "$CM/.venv" \
+  || { echo "ERROR: could not create the virtual environment."; exit 1; }
+"$CM/.venv/bin/pip" install --upgrade pip >/dev/null 2>&1 || true
+"$CM/.venv/bin/pip" install --no-cache-dir -r "$REQS" \
+  || { echo; echo "ERROR: dependency install failed (network drop or not enough free memory on the live ISO)."; exit 1; }
+
+echo
+echo "[3/3] Verifying…"
+if "$CM/.venv/bin/python" -c 'import PyQt6.QtCore' >/dev/null 2>&1; then
+    echo
+    hr
+    echo "  ✓ The Dev session is ready."
+    echo "  Switch to it from Settings → Session → 'Switch to Dev session'."
+    hr
+    exit 0
+else
+    echo "ERROR: PyQt6 still isn't importable — setup did not complete cleanly."
+    exit 1
+fi

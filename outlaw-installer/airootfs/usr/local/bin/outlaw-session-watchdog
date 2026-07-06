@@ -1,0 +1,154 @@
+#!/bin/bash
+# ============================================================================
+# outlaw-session-watchdog — crash-loop guard for the X session.
+# ----------------------------------------------------------------------------
+# Wraps the actual session launcher (outlaw-codemaker, electron, etc.) and
+# tracks consecutive quick deaths. If a session crashes 3 times in a row
+# without ever running long enough to be considered "healthy", we force the
+# next boot into Desktop session and drop a marker file the shell reads to
+# show a "Safe mode — last session crashed repeatedly" banner.
+#
+# Usage:
+#   outlaw-session-watchdog <session-name> <command> [args...]
+#
+# Where <session-name> is one of: dev, desktop, tty.
+#
+# State files (in $HOME):
+#   .outlaw-session-fails   JSON: {"fails": N, "session": "dev|desktop"}
+#   .outlaw-safe-mode       Marker present iff we just forced a fallback.
+#                           Contains a one-line human reason. Shell reads it
+#                           on boot, displays a banner, then deletes it.
+#
+# A session is "healthy" if it ran for at least HEALTHY_SECONDS. Manual quit
+# under that threshold is treated as a crash from the watchdog's POV — false
+# positive, but a single fast quit followed by a normal session resets the
+# counter cleanly, so it self-heals.
+# ============================================================================
+
+set -u
+
+MAX_FAILS=3
+HEALTHY_SECONDS=60
+SAFE_FALLBACK=desktop  # what we force after MAX_FAILS consecutive crashes
+
+STATE="$HOME/.outlaw-session-fails"
+SAFE_MARKER="$HOME/.outlaw-safe-mode"
+SESSION_FILE="$HOME/.outlaw-session"
+
+if [[ $# -lt 2 ]]; then
+    echo "usage: $0 <session-name> <command> [args...]" >&2
+    exit 2
+fi
+SESSION_NAME="$1"
+shift
+COMMAND=("$@")
+
+# ----- tiny JSON read helpers (no jq dependency) ----------------------------
+_state_read_int() {
+    local key="$1"
+    [[ -f "$STATE" ]] || { echo 0; return; }
+    # Grep for "key": NUMBER  — tolerant of extra whitespace.
+    local val
+    val=$(grep -oE "\"$key\"\s*:\s*[0-9]+" "$STATE" 2>/dev/null | tail -n1 \
+        | grep -oE '[0-9]+$' | tail -n1)
+    echo "${val:-0}"
+}
+_state_read_str() {
+    local key="$1"
+    [[ -f "$STATE" ]] || { echo ""; return; }
+    local val
+    val=$(grep -oE "\"$key\"\s*:\s*\"[^\"]*\"" "$STATE" 2>/dev/null | tail -n1 \
+        | sed -E 's/.*"([^"]*)"$/\1/')
+    echo "$val"
+}
+_state_write() {
+    local fails="$1" sess="$2"
+    cat > "$STATE" <<EOF
+{
+  "fails": ${fails},
+  "session": "${sess}"
+}
+EOF
+}
+
+FAILS=$(_state_read_int fails)
+PRIOR_SESSION=$(_state_read_str session)
+
+# ----- check if we should force the fallback --------------------------------
+if [[ "$FAILS" -ge "$MAX_FAILS" && "$PRIOR_SESSION" == "$SESSION_NAME" ]]; then
+    # Three or more consecutive failures of THIS session. Force the safe one.
+    if [[ "$SESSION_NAME" == "$SAFE_FALLBACK" ]]; then
+        # The desktop itself is crashing — last resort: drop to TTY. The
+        # safe-mode marker still tells the user what happened.
+        echo "$(date -Iseconds): desktop session crash-looping ($FAILS fails) — dropping to TTY." > "$SAFE_MARKER"
+        echo "tty" > "$SESSION_FILE"
+        # CRITICAL (never-strand): reset the counter BEFORE dropping to TTY. The
+        # TTY drop holds via $SESSION_FILE (no auto-retry loop), but if we left the
+        # counter at >=MAX_FAILS, a later desktop retry — after a reboot, a driver
+        # settle, or a fresh install that removes the original cause — would hit
+        # this same branch and be re-dropped to TTY INSTANTLY, forever, with no GUI
+        # way back. Clearing it gives the next desktop attempt a fresh set of tries.
+        _state_write 0 "$SESSION_NAME"
+        exit 0  # .xinitrc reads $SESSION_FILE and exits X
+    fi
+    echo "$(date -Iseconds): $SESSION_NAME crashed $FAILS times in a row — forcing $SAFE_FALLBACK." > "$SAFE_MARKER"
+    echo "$SAFE_FALLBACK" > "$SESSION_FILE"
+    # Reset counter to 0 since we're switching sessions — give the fallback a
+    # clean slate. (If desktop itself starts crashing, the next pass through
+    # the watchdog will start counting fresh against "desktop".)
+    _state_write 0 "$SAFE_FALLBACK"
+    echo "outlaw-session-watchdog: $SESSION_NAME crash-looping. Forced $SAFE_FALLBACK." >&2
+    # Tell .xinitrc to re-read the session file and pick the fallback. Exit
+    # non-zero so the caller knows we didn't run the requested command.
+    exit 87
+fi
+
+# ----- safe-graphics fallback (real-hardware GPU/GL crash recovery) ----------
+# If this session has crashed before (counter) or we've already fallen back
+# (sticky marker), the host's hardware GL is suspect — e.g. a flaky Intel/Mesa
+# stack where "failed to load module intel" makes Electron's GPU process and
+# picom's glx compositor die or paint the window black. Force software GL, stop
+# the compositor, and (for an Electron session) disable GPU compositing. Sticky
+# via a marker so we don't flip-flop boot-to-boot. OUTLAW_FORCE_GPU=1 opts out;
+# delete ~/.outlaw-safe-gfx to retry hardware GL on the next boot.
+SAFE_GFX_MARKER="$HOME/.outlaw-safe-gfx"
+if [[ "${OUTLAW_FORCE_GPU:-0}" != "1" ]]; then
+    NEED_SAFE=0
+    [[ -f "$SAFE_GFX_MARKER" ]] && NEED_SAFE=1
+    [[ "$FAILS" -ge 1 && "$PRIOR_SESSION" == "$SESSION_NAME" ]] && NEED_SAFE=1
+    if [[ "$NEED_SAFE" == "1" ]]; then
+        export LIBGL_ALWAYS_SOFTWARE=1
+        export GALLIUM_DRIVER=llvmpipe
+        : > "$SAFE_GFX_MARKER" 2>/dev/null || true
+        # Stop the cosmetic compositor — its glx backend blacks windows on a
+        # broken GL stack. Harmless (no-op) if it isn't running.
+        pkill -x picom 2>/dev/null || true
+        # For an Electron session, add GPU-disable flags right after the binary.
+        if [[ "${COMMAND[0]}" == electron || "${COMMAND[0]}" == */electron ]]; then
+            COMMAND=("${COMMAND[0]}" --disable-gpu --disable-gpu-compositing "${COMMAND[@]:1}")
+        fi
+        echo "outlaw-session-watchdog: safe graphics active (software GL, no picom)." >&2
+    fi
+fi
+
+# ----- run the session with a start timestamp -------------------------------
+# Track this attempt as pending — if the command runs long enough we'll clear
+# it back to 0 on success.
+PENDING=$((FAILS + 1))
+_state_write "$PENDING" "$SESSION_NAME"
+
+START_TS=$(date +%s)
+"${COMMAND[@]}"
+RC=$?
+END_TS=$(date +%s)
+RAN_FOR=$((END_TS - START_TS))
+
+# ----- decide if this attempt was "healthy" ---------------------------------
+if [[ "$RAN_FOR" -ge "$HEALTHY_SECONDS" ]]; then
+    # Long enough — the user actually used the session. Clear the counter.
+    _state_write 0 "$SESSION_NAME"
+fi
+# Otherwise leave the counter at PENDING — the next attempt of the same session
+# will bump it; three in a row triggers the fallback above.
+
+exit "$RC"

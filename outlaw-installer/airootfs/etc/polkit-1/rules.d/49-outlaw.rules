@@ -1,0 +1,27 @@
+// ============================================================================
+// Outlaw OS — let the operator run the Outlaw privileged helpers without a
+// password prompt every single time.
+// ----------------------------------------------------------------------------
+// The operator account is in `wheel` and already has full sudo, so this grants
+// no new power — it just removes the repetitive pkexec password prompt for the
+// specific Outlaw helpers. Ordinary app installs become prompt-free; the shell
+// itself still asks for the 4-digit PIN (or password) before IMPORTANT installs
+// (Essentials / Security) at the UI level. Scoped to named programs only.
+// ============================================================================
+polkit.addRule(function (action, subject) {
+    if (action.id !== "org.freedesktop.policykit.exec") return;
+    if (!subject.isInGroup("wheel")) return;
+    var prog = action.lookup("program") || "";
+    var allowed = [
+        "/usr/local/bin/outlaw-pkg-install",
+        "/usr/local/bin/outlaw-update-pkgs",
+        "/usr/local/bin/outlaw-tune",
+        "/usr/local/bin/outlaw-perf",
+        "/usr/local/bin/outlaw-update-apply",
+        "/usr/local/bin/outlaw-update-rollback",
+        "/usr/local/bin/outlaw-driver-profile"
+    ];
+    if (allowed.indexOf(prog) !== -1) {
+        return polkit.Result.YES;
+    }
+});

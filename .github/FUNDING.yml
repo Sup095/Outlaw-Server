@@ -1,0 +1,20 @@
+# Edit the lines for the platforms you actually use. Delete the others.
+# Anything left here will show up under the "Sponsor" button on the repo page.
+
+# GitHub Sponsors (requires applying first at https://github.com/sponsors).
+github: [your-github-username]
+
+# Ko-fi: the part after https://ko-fi.com/ — fastest non-GH option.
+ko_fi: your-kofi-handle
+
+# Buy Me a Coffee: the part after https://buymeacoffee.com/
+buy_me_a_coffee: your-bmc-handle
+
+# Patreon: the part after https://patreon.com/
+patreon: your-patreon-handle
+
+# Open Collective: the part after https://opencollective.com/
+open_collective: your-oc-handle
+
+# Up to 4 custom URLs (PayPal.me, your own donation page, etc).
+custom: ['https://paypal.me/your-paypal-handle']

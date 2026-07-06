@@ -1,0 +1,31 @@
+# ============================================================================
+# Outlaw OS — diagnostic check (parameterized)
+# ----------------------------------------------------------------------------
+# Started by outlaw-diagnose-{daily,weekly,monthly}.timer with the profile
+# name as the instance ID (%i). The user can also fire one off manually:
+#
+#     systemctl --user start outlaw-diagnose@quick.service
+#
+# Reports land in ~/.outlaw-diagnostics/, the same dir the in-shell runs use.
+# notify-send pops only on warnings/failures so a healthy system is silent.
+# ============================================================================
+
+[Unit]
+Description=Outlaw OS diagnostic check (%i profile)
+Documentation=man:outlaw-diagnose(1)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/outlaw-diagnose %i
+# Soft resource caps — a runaway test shouldn't wedge the box, but we don't
+# want a slow SMART probe to die for being slow either.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=20min
+# notify-send needs a session bus to reach the user's notification daemon.
+# user-services already inherit DBUS_SESSION_BUS_ADDRESS, but make it
+# explicit so the unit works even when started outside a graphical session.
+PassEnvironment=DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR
+
+[Install]
+WantedBy=default.target

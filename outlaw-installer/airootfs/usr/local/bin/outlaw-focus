@@ -1,0 +1,39 @@
+#!/bin/sh
+# ============================================================================
+# outlaw-focus — give keyboard focus to a window even with NO window manager.
+# ----------------------------------------------------------------------------
+# Outlaw's session is a deliberately minimal no-WM kiosk: the Electron shell is
+# the only surface that ever had X input focus. When we launch ANOTHER window
+# (the installer terminal, an app from the Apps panel) it maps ON TOP and is
+# visible — but nothing transfers X keyboard focus to it, because that's a job
+# normally done by a window manager. The symptom: "the window appears but typing
+# does nothing; input still goes to the desktop behind it."
+#
+# This polls for the target window by NAME (title) or CLASS and sets input focus
+# directly with XSetInputFocus (via `xdotool windowfocus`), which works without
+# a WM. It also raises the window and warps the pointer inside it so a
+# pointer-focus model works too. Best-effort: it never fails the caller.
+#
+# Usage: outlaw-focus "<name-or-class-substring>" [tries]
+#   tries = number of 0.2s polls to wait for the window (default 40 ≈ 8s)
+# ============================================================================
+[ -n "$1" ] || exit 0
+command -v xdotool >/dev/null 2>&1 || exit 0
+
+PATTERN="$1"
+TRIES="${2:-40}"
+i=0
+while [ "$i" -lt "$TRIES" ]; do
+    # Prefer a title match; fall back to a WM_CLASS match. tail -n1 = newest.
+    WID="$(xdotool search --name "$PATTERN" 2>/dev/null | tail -n1)"
+    [ -n "$WID" ] || WID="$(xdotool search --class "$PATTERN" 2>/dev/null | tail -n1)"
+    if [ -n "$WID" ]; then
+        xdotool windowraise "$WID" 2>/dev/null || true
+        xdotool windowfocus "$WID" 2>/dev/null || true
+        xdotool mousemove --window "$WID" 40 40 2>/dev/null || true
+        exit 0
+    fi
+    i=$((i + 1))
+    sleep 0.2
+done
+exit 0
