@@ -1,0 +1,6 @@
+# Outlaw Server is a Linux OS — every script here runs on Linux, during the CI
+# ISO build AND on the installed system. A Windows checkout/edit must never
+# smuggle CRLF into a script (a `#!/bin/bash\r` shebang or `set -eo pipefail\r`
+# silently breaks it). Force LF for all text files, in the repo and the working
+# tree. Binary files are auto-detected and left untouched.
+* text=auto eol=lf
