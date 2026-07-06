@@ -10,11 +10,11 @@
 # shellcheck disable=SC2034
 # ============================================================================
 
-iso_name="outlaw-os"
-iso_label="OUTLAW_$(date +%Y%m)"
-iso_publisher="Outlaw OS"
-iso_application="Outlaw OS Live / Boot Manager"
-iso_version="2.0.180"
+iso_name="outlaw-server"
+iso_label="OUTLAWSRV_$(date +%Y%m)"
+iso_publisher="Outlaw Server"
+iso_application="Outlaw Server Live / Installer"
+iso_version="0.1.0"
 install_dir="arch"
 buildmodes=('iso')
 bootmodes=('bios.syslinux.mbr' 'bios.syslinux.eltorito'

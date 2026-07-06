@@ -25,10 +25,10 @@ const aiAgent = require('./ai-agent');
 const updater = require('./updater');
 const APP_VERSION = require('./package.json').version;
 const { DiagnosticRunner, listReports: listDiagReports, readReport: readDiagReport } = require('./diagnostics');
-const tts = require('./tts');
-const { VramTierMonitor } = require('./vram-tier');
-const coreai = require('./coreai');
 const errorlog = require('./errorlog');   // F1 — combined error/warning log
+// Server fork: the sci-fi System Core (coreai), cold-mode voice (tts) and the
+// VRAM tier monitor (vram-tier) were removed — a server has no GPU-VRAM budget
+// dance and no talking centerpiece. Their IPC handlers + boot wiring are gone.
 
 // Capture the shell's own crashes/rejections into the combined log so a desktop
 // crash-loop is diagnosable. Never let the handler itself throw.
@@ -90,17 +90,6 @@ function getDiagRunner() {
 // polling kicks off when the first renderer subscribes (we treat window
 // creation as the implicit subscription) so a shell launched purely to handle
 // IPC from a script doesn't fork nvidia-smi every 10s for nobody.
-const vramTier = new VramTierMonitor();
-// NOTE: the persisted mode is applied just AFTER `settings` is loaded (see below).
-// It used to be set here, but `settings` is declared further down — referencing it
-// at module-load time threw "Cannot access 'settings' before initialization" (a
-// temporal-dead-zone error), so the user's saved VRAM-saver mode never actually
-// applied on boot. Now applied once settings exist.
-vramTier.on('tier-changed', (status) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('vram-tier-changed', status);
-    }
-});
 
 // ---------------------------------------------------------------------------
 // Settings (persisted JSON in userData)
@@ -365,12 +354,6 @@ function privUpdate(timeout) {
 }
 
 let settings = loadSettings();
-
-// Apply the persisted VRAM-saver mode on boot so the very first tier read reflects
-// the user's pref instead of the constructor default ('auto'). Done HERE (not at the
-// vramTier construction above) because `settings` only exists from this line on.
-try { vramTier.setMode(settings.vramSaverMode || 'auto'); }
-catch (e) { console.warn('vramTier initial setMode rejected:', e.message); }
 
 // ---------------------------------------------------------------------------
 // Allowlisted application launchers
@@ -2252,30 +2235,6 @@ function registerIpc() {
         }
     });
 
-    // ----- SC5 Cold-mode TTS --------------------------------------------------
-    // Engine detection is cached for 30s inside tts.js. speak() respects the
-    // coreVoiceEnabled setting — if the user has the toggle off, the call
-    // returns ok:true with did:'muted' so the renderer doesn't treat the
-    // no-op as an error.
-
-    ipcMain.handle('tts:status', async (_e, opts) => {
-        // Caller can pass {force:true} after installing piper/espeak via the
-        // Apps panel to bypass the 30s detection cache without waiting.
-        const force = !!(opts && opts.force);
-        const eng = await tts.detectEngine(force);
-        return { ...eng, enabled: !!settings.coreVoiceEnabled };
-    });
-
-    ipcMain.handle('tts:speak', async (_e, text) => {
-        if (!settings.coreVoiceEnabled) return { ok: true, did: 'muted' };
-        return await tts.speak(text);
-    });
-
-    ipcMain.handle('tts:cancel', () => {
-        tts.cancel();
-        return { ok: true };
-    });
-
     // ----- SC4 Scheduled diagnostic checks --------------------------------
     // The actual timers are systemd user units shipped in airootfs (or copied
     // to ~/.config/systemd/user/ for off-skel users). These handlers just
@@ -2363,152 +2322,6 @@ function registerIpc() {
         );
         if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout || '').slice(-300) };
         return { ok: true, started: entry.profile };
-    });
-
-    // ----- SC7 VRAM tier --------------------------------------------------
-    // status() always returns the cached probe when fresh — perfect for the
-    // System Core badge that re-asks every visit. `force:true` skips the
-    // cache (Settings dropdown change handler uses this so the subtitle
-    // updates in the same beat).
-
-    ipcMain.handle('vram:status', async (_e, opts) => {
-        const force = !!(opts && opts.force);
-        return await vramTier.getStatus(force);
-    });
-
-    ipcMain.handle('vram:set-mode', async (_e, mode) => {
-        try {
-            vramTier.setMode(mode);
-            // Persist alongside the rest of settings so the choice survives
-            // a shell restart. settings:set would also do this, but Settings
-            // UI calls vram:set-mode directly to make the IPC trip shorter.
-            settings = saveSettings({ ...settings, vramSaverMode: mode });
-            return { ok: true, status: await vramTier.getStatus(true) };
-        } catch (e) {
-            return { ok: false, error: e.message };
-        }
-    });
-
-    // ----- SC6 System Core Live AI ----------------------------------------
-    // coreai:ask routes a user prompt through the configured AI engine (the
-    // built-in base AI by default, or Ollama / LM Studio — via coreai.ask using
-    // aiBackend()) and then dispatches whatever tool the model picked. ALL tool
-    // routes use existing audited code paths — no new privileged endpoints.
-    // Refuses to talk to the engine at all when VRAM is in the `minimal` tier;
-    // the renderer already won't let the user toggle Live mode on in that case,
-    // but this is the defence-in-depth backstop.
-
-    ipcMain.handle('coreai:status', async () => {
-        const be = aiBackend();
-        const lm = await coreai.status(be);
-        const vram = await vramTier.getStatus();
-        // Friendly label for whichever engine Live mode actually uses — so the
-        // System Core UI never hard-codes "LM Studio" when the user is on the
-        // built-in base AI or Ollama (the default is the built-in base AI now).
-        const engineLabel = be.kind === 'base' ? 'Built-in AI'
-            : be.kind === 'ollama' ? 'Ollama'
-            : 'LM Studio';
-        return {
-            lmStudio: lm,
-            engine: be.kind,            // 'base' | 'ollama' | 'lmstudio'
-            engineLabel,
-            vramTier: vram.tier,
-            vramLabel: vram.label,
-            // Gating intent: emergency tier means Live mode should refuse.
-            allowLive: vram.tier !== 'minimal',
-        };
-    });
-
-    ipcMain.handle('coreai:reset', (_e, sessionId) => {
-        coreai.resetSession(sessionId);
-        return { ok: true };
-    });
-
-    ipcMain.handle('coreai:ask', async (_e, payload) => {
-        const { sessionId, text } = payload || {};
-        const vram = await vramTier.getStatus();
-        if (vram.tier === 'minimal') {
-            return {
-                ok: false,
-                error: 'Core suppressed — VRAM critical. Free some VRAM or change saver mode.',
-            };
-        }
-        const appIds = Object.keys(APP_REGISTRY);
-        const r = await coreai.ask({
-            sessionId, text, appIds,
-            ...aiBackend(),                                  // base Ollama model or LM Studio
-            machine: machineSummary(await gatherSpecs()),
-        });
-        if (!r.ok) return r;
-
-        // Route the tool. Each branch uses the SAME helpers the user-facing
-        // IPC handlers do — no new shells out, no new bypass.
-        const intent = r.intent;
-        let did = 'answer';
-        let detail = '';
-        try {
-            if (intent.tool === 'run_diagnostic') {
-                const profile = (intent.arg || '').toLowerCase().trim();
-                if (['quick', 'standard', 'thorough'].includes(profile)) {
-                    const runner = getDiagRunner();
-                    // Fire-and-forget — progress events stream via the
-                    // existing 'diagnostics-progress' channel. The Core's
-                    // bubble shows intent.text immediately.
-                    runner.run(profile).catch((err) => {
-                        if (mainWindow && !mainWindow.isDestroyed()) {
-                            mainWindow.webContents.send('diagnostics-progress', {
-                                phase: 'error', error: err.message,
-                            });
-                        }
-                    });
-                    did = 'run_diagnostic';
-                    detail = profile;
-                } else {
-                    did = 'invalid_tool_arg';
-                    detail = `unknown profile: ${profile}`;
-                }
-            } else if (intent.tool === 'launch_app') {
-                const id = (intent.arg || '').toLowerCase().trim();
-                const entry = APP_REGISTRY[id];
-                if (entry) {
-                    const bin = await resolveBinary(entry);
-                    if (bin) {
-                        launchDetached(bin, entry.args || []);
-                        did = 'launch_app';
-                        detail = entry.label;
-                    } else {
-                        did = 'app_not_installed';
-                        detail = entry.label + ' is not installed';
-                    }
-                } else {
-                    did = 'invalid_tool_arg';
-                    detail = `unknown app id: ${id}`;
-                }
-            } else if (intent.tool === 'notify') {
-                if (IS_LINUX) {
-                    // Reuse the diagnostics CLI's notify-send pattern.
-                    const msg = (intent.arg || intent.text || '').slice(0, 240);
-                    const notifChild = spawn('notify-send', [
-                        '--app-name=Outlaw Core',
-                        '--urgency=normal',
-                        'Outlaw Core', msg,
-                    ], { stdio: 'ignore', detached: true });
-                    // If notify-send is missing, the ENOENT surfaces as an 'error'
-                    // event — swallow it so it can't bubble to uncaughtException.
-                    notifChild.on('error', () => {});
-                    notifChild.unref();
-                    did = 'notify';
-                    detail = 'sent';
-                } else {
-                    did = 'notify_unavailable';
-                    detail = 'off-Linux';
-                }
-            }
-        } catch (e) {
-            did = 'tool_error';
-            detail = e.message;
-        }
-        return { ok: true, intent, did, detail };
     });
 
     // ----- Live-ISO detection ---------------------------------------------
@@ -2926,13 +2739,6 @@ function registerIpc() {
         // If updater config changed, restart the background timer accordingly.
         if (before.autoCheck !== settings.autoCheck || before.updateRepo !== settings.updateRepo) {
             startAutoCheck();
-        }
-        // SC7 — apply VRAM saver mode flips immediately so the tier badge,
-        // any subscribed renderers, and the cached probe all catch up
-        // without waiting for the next 10s background poll.
-        if (before.vramSaverMode !== settings.vramSaverMode) {
-            try { vramTier.setMode(settings.vramSaverMode); }
-            catch (e) { console.warn('vramTier.setMode rejected:', e.message); }
         }
         // Power management — re-sync the idle watch / X blanking timers as soon
         // as the user changes them (no restart needed).
@@ -3758,10 +3564,6 @@ app.whenReady().then(() => {
     }
     createWindow();
     startAutoCheck();
-    // SC7 — start the VRAM tier background poll now that a renderer exists.
-    // 10s cadence; uses .unref() inside the monitor so it never holds the
-    // event loop open during shutdown.
-    vramTier.startBackgroundPoll();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

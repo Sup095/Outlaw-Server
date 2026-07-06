@@ -1,9 +1,9 @@
 {
-  "name": "outlaw-os",
-  "version": "2.0.180",
-  "description": "Outlaw OS - lightweight, secure Linux desktop for AI-driven Godot game development with a built-in local AI (Ollama / LM Studio optional) + Steam",
+  "name": "outlaw-server",
+  "version": "0.1.0",
+  "description": "Outlaw Server - a stripped-down, security-first Linux server OS managed from a web browser, with one-click game-server (Pterodactyl) setup",
   "main": "main.js",
-  "author": "Outlaw OS",
+  "author": "Outlaw Server",
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "start": "electron .",
@@ -16,20 +16,14 @@
     "electron-builder": "^26.8.1"
   },
   "build": {
-    "appId": "com.outlaw.os",
+    "appId": "com.outlaw.server",
     "files": [
       "main.js",
       "preload.js",
       "ai-agent.js",
       "renderer.js",
-      "syscore.js",
       "diagnostics.js",
       "diagnostics-cli.js",
-      "tts.js",
-      "dialogue.js",
-      "dialogue.json",
-      "vram-tier.js",
-      "coreai.js",
       "updater.js",
       "errorlog.js",
       "help-data.js",

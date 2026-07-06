@@ -20,11 +20,11 @@ RELENG="/usr/share/archiso/configs/releng"
 # Default version baked in for local builds. CI overrides this from the git
 # tag via OUTLAW_ISO_VERSION (see .github/workflows/build-iso.yml) so the
 # artifact filename always matches the tag the user pushed.
-ISO_VERSION="${OUTLAW_ISO_VERSION:-2.0.35}"
-ISO_FINAL="$OUT_DIR/outlaw-os-v${ISO_VERSION}.iso"
+ISO_VERSION="${OUTLAW_ISO_VERSION:-0.1.0}"
+ISO_FINAL="$OUT_DIR/outlaw-server-v${ISO_VERSION}.iso"
 
 echo "========================================"
-echo "   Building Outlaw OS Live ISO v${ISO_VERSION}"
+echo "   Building Outlaw Server Live ISO v${ISO_VERSION}"
 echo "========================================"
 
 # --- Preconditions ---------------------------------------------------------
@@ -159,10 +159,10 @@ EOF
 echo "[6/7] Patching profile metadata…"
 PD="$PROFILE_DIR/profiledef.sh"
 sed -i \
-    -e 's/^iso_name=.*/iso_name="outlaw-os"/' \
+    -e 's/^iso_name=.*/iso_name="outlaw-server"/' \
     -e "s/^iso_version=.*/iso_version=\"${ISO_VERSION}\"/" \
-    -e 's/^iso_publisher=.*/iso_publisher="Outlaw OS"/' \
-    -e 's#^iso_application=.*#iso_application="Outlaw OS Live / Boot Manager"#' \
+    -e 's/^iso_publisher=.*/iso_publisher="Outlaw Server"/' \
+    -e 's#^iso_application=.*#iso_application="Outlaw Server Live / Installer"#' \
     "$PD"
 # Ensure our helper scripts are executable in the image.
 #   outlaw-install-aur     — pkexec helper for on-demand AUR install (steamcmd).
@@ -185,8 +185,8 @@ done
 echo "[7/7] Running mkarchiso (this takes a while)…"
 mkarchiso -v -w "$WORK_DIR" -o "$OUT_DIR" "$PROFILE_DIR"
 
-# mkarchiso outputs outlaw-os-<version>-x86_64.iso — normalize the name.
-BUILT_ISO="$(find "$OUT_DIR" -maxdepth 1 -name 'outlaw-os-*.iso' -type f | head -n1 || true)"
+# mkarchiso outputs outlaw-server-<version>-x86_64.iso — normalize the name.
+BUILT_ISO="$(find "$OUT_DIR" -maxdepth 1 -name 'outlaw-server-*.iso' -type f | head -n1 || true)"
 if [[ -z "$BUILT_ISO" ]]; then
     echo "❌ ERROR: ISO not produced. Check the mkarchiso output above."
     exit 1

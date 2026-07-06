@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none';">
-    <title>OUTLAW OS</title>
+    <title>OUTLAW SERVER</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -61,7 +61,7 @@
 <div id="app">
     <!-- Top bar -->
     <header class="topbar">
-        <span class="brand">OUTLAW_OS</span>
+        <span class="brand">OUTLAW_SERVER</span>
         <span class="dim">// OPERATOR</span>
         <span class="pill live-badge" id="live-badge" title="You're running the live demo — many features are locked until you install Outlaw OS to a disk." hidden>⚠ LIVE · LIMITED</span>
         <span class="spacer"></span>
@@ -81,15 +81,11 @@
     <!-- Sidebar -->
     <nav class="sidebar" id="nav">
         <button class="nav-item active" data-screen="dashboard"><span class="ico">▣</span> Dashboard</button>
-        <button class="nav-item" data-screen="syscore"><span class="ico">⌬</span> System Core</button>
         <button class="nav-item" data-screen="files"><span class="ico">📁</span> Files</button>
         <button class="nav-item" data-screen="tasks"><span class="ico">📊</span> Task Manager</button>
         <button class="nav-item" data-screen="terminal"><span class="ico">&gt;_</span> Terminal</button>
-        <button class="nav-item" data-screen="gaming"><span class="ico">🎮</span> Gaming</button>
-        <button class="nav-item" data-screen="gamedev"><span class="ico">🛠</span> Game Dev</button>
         <button class="nav-item" data-screen="apps"><span class="ico">📦</span> Apps</button>
-        <button class="nav-item" data-screen="ai"><span class="ico">✦</span> AI Assistant</button>
-        <button class="nav-item" data-screen="calc"><span class="ico">🔢</span> Calculator</button>
+        <button class="nav-item" data-screen="ai"><span class="ico">✦</span> AI Helper</button>
         <button class="nav-item" data-screen="settings"><span class="ico">⚙</span> Settings</button>
         <button class="nav-item" data-screen="help"><span class="ico">❔</span> Help</button>
     </nav>
@@ -1130,8 +1126,6 @@
     </div>
 </div>
 
-<script src="dialogue.js"></script>
-<script src="syscore.js"></script>
 <script src="help-data.js"></script>
 <script src="renderer.js"></script>
 </body>
