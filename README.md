@@ -5,8 +5,9 @@ Built on the same hardened foundation as [Outlaw OS](https://github.com/Sup095/O
 with everything a desktop needs and a server doesn't ripped out — and everything a
 server admin needs added in.
 
-> **Status: pre-alpha (Phase 0).** Forked from Outlaw OS v2.0.180. Nothing here is
-> ready to run yet — the roadmap below is being built top to bottom.
+> **Status: alpha (Phase 3 of 6).** Forked from Outlaw OS v2.0.180. The control
+> daemon, sign-in and remote access work; the server toolset and one-click game
+> servers are still being built. Not yet tested on real hardware.
 
 ---
 
@@ -50,8 +51,8 @@ guarded terminal.
 |:--:|:--|:--|
 | ✅ | **0 · Fork & strip** | The desktop OS cut down to a bootable, bare-bones server OS. |
 | ✅ | **1 · Headless daemon** | `outlaw-serverd`: the control panel served over HTTP; **the UI itself is now optional** (see below). |
-| ✅ | **2 · Sign-in that means it** | Password (scrypt) + TOTP 2FA, revocable server-side sessions, per-IP lockout, audit log. TLS arrives with Phase 3, which is when it starts mattering. |
-| 🔭 | **3 · Remote access** | Tailscale/WireGuard integration — manage every box from anywhere, with nothing on the public internet. |
+| ✅ | **2 · Sign-in that means it** | Password (scrypt) + TOTP 2FA, revocable server-side sessions, per-IP lockout, audit log. |
+| ✅ | **3 · Remote access** | Tailscale/WireGuard — manage every box from anywhere, with nothing on the public internet. |
 | 🔭 | **4 · Server toolset** | Services manager, firewall, journal/log viewer, SSH keys, storage, live resource dashboard. |
 | 🔭 | **5 · Game servers** | One-click Pterodactyl (+ Docker), optional Portainer & Cockpit — all removable. |
 | 🔭 | **6 · Polish & first install** | Accessibility pass, docs, and the first real-hardware test. |
@@ -69,9 +70,36 @@ the password *and* a live code. Five bad attempts locks that address out for 15
 minutes, and every sign-in and privileged action is written to an audit log
 (`outlaw audit`).
 
-Until Phase 3 adds an encrypted path, the panel **binds to loopback only and refuses
-to start on a network address** — the daemon speaks plain HTTP, and shipping your
-password across a LAN in the clear would be indefensible.
+### Reaching it from anywhere
+
+The panel speaks plain HTTP, so it is only ever allowed to listen in two places:
+**loopback**, or **an address that belongs to a WireGuard/Tailscale interface** —
+where everything is already encrypted end to end before it touches a wire. A LAN
+address, a public address or a wildcard bind is **refused, and the daemon exits**.
+That is stronger than a firewall rule: the socket is never created on those
+interfaces at all, so there is no rule to get wrong or forget after a reboot.
+
+```
+sudo outlaw remote up        # join your Tailscale network — prints a sign-in link
+sudo outlaw remote bind tunnel
+```
+
+That's it. The panel is now reachable from any device on your tailnet and from
+nowhere else. `outlaw remote` shows exactly where things stand and where the panel
+can be reached.
+
+Want a padlock and a real hostname instead of an IP? `sudo outlaw remote serve on`
+puts Tailscale's own HTTPS proxy in front (a free Let's Encrypt certificate for the
+machine's `*.ts.net` name) while the daemon stays on loopback.
+
+Prefer to involve no third party at all? `wireguard-tools` is installed and a
+self-hosted WireGuard address is accepted by exactly the same rule.
+
+**Remote access is off until you ask for it.** `tailscaled` is not enabled at
+install time, and `outlaw remote off` puts the machine back to nothing running and
+nothing listening. It is worth being straight about this one: a tunnel daemon is a
+real process with real (small) memory use and periodic keepalive traffic — that is
+the honest price of being reachable, and it is why it is opt-in rather than on.
 
 ### Your server, your overhead
 

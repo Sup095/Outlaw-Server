@@ -28,8 +28,8 @@ set -uo pipefail
 # ESSENTIAL_PKGS — the MINIMUM set needed to (a) boot the installed system,
 # (b) bring up the Outlaw Server panel, and (c) manage the box remotely.
 # Everything a particular server actually serves (Docker, Pterodactyl,
-# Portainer, Cockpit, Tailscale …) installs ON DEMAND after setup, so the
-# base install stays small and every admin only pays for what they use.
+# Portainer, Cockpit …) installs ON DEMAND after setup, so the base install
+# stays small and every admin only pays for what they use.
 #
 # Why so slim? A failure in any single package aborts pacstrap and leaves a
 # half-installed system. Fewer packages = smaller failure surface = a server
@@ -50,6 +50,13 @@ ESSENTIAL_PKGS=(
   # that lets the machine be fixed when the panel itself is unreachable.
   # sshd is enabled below (key-based logins; see the post-install notes).
   openssh
+
+  # The encrypted tunnel the control panel is reached through. Installed now,
+  # from the ISO's own package cache, rather than on demand: you set remote
+  # access up at the moment you are trying to stop needing physical access, and
+  # that is the worst possible time to discover it needs a package download.
+  # Neither daemon runs until `outlaw remote up` asks for it.
+  tailscale wireguard-tools
 
   # Bootloader + partition tooling (installer + recovery)
   grub efibootmgr os-prober dosfstools mtools gptfdisk parted
@@ -553,16 +560,11 @@ pacstrap_and_configure() {
     cp -rT /usr/share/outlaw-os "$TARGET/usr/share/outlaw-os" 2>/dev/null || true
     rm -rf "$TARGET/usr/share/outlaw-os/node_modules" 2>/dev/null || true
 
-    # Greeter Electron app + Outlaw CodeMaker bundle (both baked into the live
-    # ISO by build.sh). Either may be absent if the build skipped them; the
-    # launcher scripts handle missing-bundle gracefully.
+    # Greeter Electron app (baked into the live ISO by build.sh). May be absent
+    # if the build skipped it; the launcher handles a missing bundle gracefully.
     if [[ -d /usr/share/outlaw-greeter ]]; then
         mkdir -p "$TARGET/usr/share/outlaw-greeter"
         cp -rT /usr/share/outlaw-greeter "$TARGET/usr/share/outlaw-greeter"
-    fi
-    if [[ -d /opt/outlaw-codemaker ]]; then
-        mkdir -p "$TARGET/opt/outlaw-codemaker"
-        cp -rT /opt/outlaw-codemaker "$TARGET/opt/outlaw-codemaker"
     fi
 
     # GUI installer app — copy it too so --uninstall / reinstall works offline.
@@ -671,7 +673,12 @@ systemctl enable ollama 2>/dev/null || true
 # /etc/outlaw-server/daemon.json, or run `outlaw mode lean`). Either way it does
 # NO background work — no timers, no polling.
 systemctl enable outlaw-serverd 2>/dev/null || true
-install -d -m 755 /var/lib/outlaw-server 2>/dev/null || true
+# Holds the credential file and the audit log. 0700: only root has any business
+# in here, and the file modes inside shouldn't be the only thing protecting it.
+install -d -m 700 /var/lib/outlaw-server 2>/dev/null || true
+# tailscaled is deliberately NOT enabled. Remote access is opt-in — `outlaw
+# remote up` enables and starts it. Until then nothing is running and nothing is
+# reachable, which is the correct default for a machine that just got installed.
 
 # Cap the systemd stop timeout so a slow-to-exit graphical session can't hang
 # shutdown/reboot for ~90s ("a stop job is running…" / watchdog messages).
@@ -681,17 +688,10 @@ cat > /etc/systemd/system.conf.d/10-outlaw-timeout.conf <<TIMEOUT
 DefaultTimeoutStopSec=15s
 TIMEOUT
 
-# Enable the multilib repo so Steam and the 32-bit gaming libraries can install
-# (the first-boot wizard's Steam bundle + the Apps panel both need it). Arch
-# ships /etc/pacman.conf with [multilib] commented out — uncomment the header
-# and its Include line.
-sed -i '/^#\[multilib\]/{s/^#//; n; s/^#//}' /etc/pacman.conf
+# NOTE: multilib stays DISABLED. It exists for 32-bit gaming libraries, which a
+# server has no use for — every extra repo is more packages to trust and update.
 
-# AI is provided by LM Studio (a user-installed desktop app, not a systemd
-# service). The shell talks to it on 127.0.0.1:1234 only when the user toggles
-# the AI on. Nothing to enable/disable here.
-
-# GRUB with OTHER-OS detection enabled (powers dual boot + hotswap).
+# GRUB with OTHER-OS detection enabled (so an existing OS on the box survives).
 sed -i 's/^#\?GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' /etc/default/grub
 grep -q GRUB_DISABLE_OS_PROBER /etc/default/grub || echo 'GRUB_DISABLE_OS_PROBER=false' >> /etc/default/grub
 sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=saved/' /etc/default/grub
@@ -705,24 +705,6 @@ fi
 grub-mkconfig -o /boot/grub/grub.cfg
 mkinitcpio -P
 
-# --- Outlaw CodeMaker venv (Dev session runtime) ---------------------------
-# CodeMaker source was copied to /opt/outlaw-codemaker before the chroot. If
-# the bundle is present we create a venv and install its pinned Linux deps so
-# the launcher (/usr/local/bin/outlaw-codemaker) finds .venv/bin/python on the
-# first Dev session and starts cleanly. Skip on failure — the launcher's
-# fallback opens the desktop shell with a notification.
-if [[ -f /opt/outlaw-codemaker/main.py ]]; then
-    [[ \$AUTO = 1 ]] && echo "@@STAGE devenv Installing the Dev session (Outlaw CodeMaker)…"
-    REQS=/opt/outlaw-codemaker/requirements-linux.txt
-    [[ -f "\$REQS" ]] || REQS=/opt/outlaw-codemaker/requirements.txt
-    if [[ -f "\$REQS" ]]; then
-        echo "Provisioning Outlaw CodeMaker venv at /opt/outlaw-codemaker/.venv (this may take a few minutes)…"
-        python -m venv /opt/outlaw-codemaker/.venv || true
-        /opt/outlaw-codemaker/.venv/bin/pip install --upgrade pip || true
-        /opt/outlaw-codemaker/.venv/bin/pip install --no-cache-dir -r "\$REQS" \
-            || echo "WARNING: some Outlaw CodeMaker dependencies failed to install — Dev session may degrade."
-    fi
-fi
 CHROOT
 
     # Display: the installed system uses the standard kernel mode-setting path
@@ -744,14 +726,18 @@ CHROOT
     emit "DONE install complete"
     echo
     hr
-    grn "✅ Outlaw OS installed successfully."
+    grn "✅ Outlaw Server installed successfully."
     hr
     echo "Next steps:"
     echo "  1. Remove the USB / detach the ISO."
-    echo "  2. Reboot — pick 'Outlaw OS' in the boot menu (your other operating"
-    echo "     systems are still there too)."
-    echo "  3. On first boot, the setup wizard offers Steam / Firefox / Godot."
-    echo "Switch OSes any time with the HOTSWAP button or 'outlaw-hotswap'."
+    echo "  2. Reboot — pick 'Outlaw Server' in the boot menu (your other"
+    echo "     operating systems are still there too)."
+    echo "  3. Create the administrator:     sudo outlaw passwd"
+    echo "     That prints a 2FA secret for your authenticator app."
+    echo "  4. Reach it from anywhere:       sudo outlaw remote up"
+    echo
+    echo "The control panel starts on http://127.0.0.1:7717 (this machine only)"
+    echo "until you set up remote access. Run 'outlaw help' for everything else."
     echo
     if [[ "$AUTO_MODE" != 1 ]]; then
         pause_enter

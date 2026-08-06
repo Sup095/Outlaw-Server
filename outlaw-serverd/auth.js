@@ -159,27 +159,54 @@ function totpUri(user, secret, issuer = 'Outlaw Server') {
 // the safe default for a control plane) ------------------------------------
 
 const sessions = new Map();   // token -> {user, expires, ip}
-const failures = new Map();   // ip    -> {count, until}
+const failures = new Map();   // key   -> {count, until}
 
-function lockoutState(ip) {
-    const f = failures.get(ip);
+// The stand-in key used when a local reverse proxy is forwarding addresses on
+// behalf of everyone. Shared between here and serverd.js, so it is named once.
+const PROXY_KEY = 'local-proxy';
+
+// How many failures a key gets before it is locked out. A real client address
+// gets the strict count. The proxy key gets a far higher one: it stands in for
+// EVERY remote client at once, so a strict limit there would let one person's
+// fat fingers lock out the whole tailnet. It exists only to stop a local process
+// forging a fresh address on every attempt and brute-forcing the panel for free.
+const BACKSTOP_MULTIPLIER = 10;
+
+// Failures are counted inside a rolling window. Without one, a handful of typos
+// spread over months would silently accumulate into a lockout — the count has
+// to mean "recently", or it means nothing.
+const FAILURE_WINDOW_MS = LOCKOUT_MS;
+
+function limitFor(key) {
+    return key === PROXY_KEY ? MAX_FAILURES * BACKSTOP_MULTIPLIER : MAX_FAILURES;
+}
+
+function lockoutState(key) {
+    const f = failures.get(key);
     if (!f) return { locked: false, remainingMs: 0 };
     if (f.until && Date.now() < f.until) return { locked: true, remainingMs: f.until - Date.now() };
-    if (f.until && Date.now() >= f.until) { failures.delete(ip); return { locked: false, remainingMs: 0 }; }
+    if (f.until && Date.now() >= f.until) { failures.delete(key); return { locked: false, remainingMs: 0 }; }
     return { locked: false, remainingMs: 0 };
 }
 
-function noteFailure(ip) {
-    const f = failures.get(ip) || { count: 0, until: 0 };
+function noteFailure(key) {
+    if (!key) return;
+    const now = Date.now();
+    let f = failures.get(key);
+    if (!f || now - f.first > FAILURE_WINDOW_MS) f = { count: 0, first: now, until: 0 };
     f.count += 1;
-    if (f.count >= MAX_FAILURES) {
-        f.until = Date.now() + LOCKOUT_MS;
-        audit('auth.lockout', { ip, failures: f.count, minutes: LOCKOUT_MS / 60000 });
+    if (f.count >= limitFor(key)) {
+        f.until = now + LOCKOUT_MS;
+        audit('auth.lockout', { key, failures: f.count, minutes: LOCKOUT_MS / 60000 });
     }
-    failures.set(ip, f);
+    failures.set(key, f);
 }
 
-function clearFailures(ip) { failures.delete(ip); }
+// Only ever called for a specific client's own key. The shared PROXY_KEY is
+// deliberately NOT cleared on a successful sign-in: it counts failures from
+// everybody behind the proxy, so letting any one success reset it would hand an
+// attacker a free reset button between every batch of guesses.
+function clearFailures(key) { if (key && key !== PROXY_KEY) failures.delete(key); }
 
 function createSession(user, ip) {
     const token = crypto.randomBytes(32).toString('hex');
@@ -237,25 +264,33 @@ function confirmTotp(user, code) {
     return { ok: true };
 }
 
-function login({ user, password, code, ip }) {
-    const lock = lockoutState(ip);
-    if (lock.locked) {
-        audit('auth.login_blocked', { user, ip });
-        return { ok: false, error: `Too many attempts. Try again in ${Math.ceil(lock.remainingMs / 60000)} minute(s).` };
+// `peerKey` is an optional second lockout key, used when the caller's address
+// was read from a forwarded header rather than the socket — see clientIp() in
+// serverd.js. Both keys must be unlocked, and both record a failure.
+function login({ user, password, code, ip, peerKey = null }) {
+    for (const key of [ip, peerKey]) {
+        if (!key) continue;
+        const lock = lockoutState(key);
+        if (lock.locked) {
+            audit('auth.login_blocked', { user, ip, key });
+            return { ok: false, error: `Too many attempts. Try again in ${Math.ceil(lock.remainingMs / 60000)} minute(s).` };
+        }
     }
+    const fail = () => { noteFailure(ip); noteFailure(peerKey); };
+
     const state = load();
     const u = state.users[String(user || '')];
     // Same failure path and message whether the user exists or the password is
     // wrong — don't help an attacker enumerate valid accounts.
     if (!u || !verifyPassword(password, u)) {
-        noteFailure(ip);
+        fail();
         audit('auth.login_failed', { user, ip, reason: 'bad_credentials' });
         return { ok: false, error: 'Incorrect user name or password.' };
     }
     if (u.totpSecret && u.totpConfirmed) {
         if (!code) return { ok: false, needTotp: true, error: 'Enter the 6-digit code from your authenticator app.' };
         if (!verifyTotp(u.totpSecret, code)) {
-            noteFailure(ip);
+            fail();
             audit('auth.login_failed', { user, ip, reason: 'bad_totp' });
             return { ok: false, needTotp: true, error: 'That code is not valid.' };
         }
@@ -279,6 +314,7 @@ module.exports = {
     verifyTotp, newTotpSecret, totpUri, totpCode,
     hashPassword, verifyPassword,
     audit,
+    PROXY_KEY,
     AUDIT_FILE, AUTH_FILE, STATE_DIR,
     _internals: { sessions, failures, lockoutState, base32Encode, base32Decode },
 };

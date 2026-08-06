@@ -24,26 +24,13 @@
 
 const os = require('os');
 const fs = require('fs');
-const { execFile } = require('child_process');
+const { run } = require('./exec');
+const remote = require('./remote');
+const config = require('./config');
 
 const IS_LINUX = process.platform === 'linux';
 
 // --- small helpers ----------------------------------------------------------
-
-// Run a binary with an argv ARRAY — never a shell string. Resolves rather than
-// rejects so a failing command is data, not an exception.
-function run(bin, args = [], { timeout = 8000 } = {}) {
-    return new Promise((resolve) => {
-        execFile(bin, args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
-            resolve({
-                ok: !err,
-                code: err && typeof err.code === 'number' ? err.code : (err ? 1 : 0),
-                stdout: String(stdout || ''),
-                stderr: String(stderr || ''),
-            });
-        });
-    });
-}
 
 function readFileSafe(p) {
     try { return fs.readFileSync(p, 'utf8'); } catch { return ''; }
@@ -238,17 +225,106 @@ const ops = {
         return r.ok ? { ok: true } : { ok: false, error: (r.stderr || 'shutdown failed').slice(-200) };
     },
 
+    // --- remote access ------------------------------------------------------
+    // Reaching this machine from somewhere else. The rules about WHERE the
+    // panel is allowed to listen live in remote.js; these operations only ever
+    // ask it, never work around it.
+
+    'remote:status': async () => remote.status(config.load()),
+
+    'remote:up': async (_ctx, { ssh, acceptDns } = {}) =>
+        remote.tailscaleUp({ ssh: ssh === true, acceptDns: acceptDns !== false }),
+
+    // hard:true also stops and disables tailscaled — back to nothing running.
+    'remote:down': async (_ctx, { hard } = {}) => remote.tailscaleDown({ hard: hard === true }),
+
+    // Move where the panel listens. Validated BEFORE anything is written, so a
+    // bad target is refused while the daemon is still happily serving on the
+    // old address — you can't lock yourself out with a typo.
+    'remote:bind': async (_ctx, { target } = {}) => {
+        const cfg = config.load();
+        const want = String(target || '').trim();
+        let host;
+
+        if (want === 'loopback' || want === 'local') {
+            host = '127.0.0.1';
+        } else if (want === 'tunnel' || want === 'auto') {
+            const cand = remote.preferredTunnelAddress();
+            if (!cand) {
+                return {
+                    ok: false,
+                    error: 'No tunnel interface is up, so there is no encrypted address to listen on.',
+                    hint: 'Connect first: sudo outlaw remote up',
+                };
+            }
+            host = cand.address;
+        } else if (want) {
+            host = want;
+        } else {
+            return { ok: false, error: 'Say where to listen: loopback, tunnel, or an address.' };
+        }
+
+        const verdict = remote.classifyBind(host);
+        if (!verdict.allowed) {
+            return { ok: false, error: `Refusing to listen on ${host} — ${verdict.reason}`, kind: verdict.kind };
+        }
+
+        // Serving through Tailscale's HTTPS proxy only makes sense while the
+        // daemon is on loopback; moving off it would leave forwarded-header
+        // trust switched on for a network-facing socket. Turn it off with the
+        // move rather than leaving a contradictory config behind.
+        const changes = { host };
+        let serveDisabled = false;
+        if (verdict.kind !== 'loopback' && cfg.trustProxy) {
+            changes.trustProxy = false;
+            serveDisabled = true;
+        }
+
+        const w = config.patch(changes);
+        if (!w.ok) return w;
+        return {
+            ok: true, host, kind: verdict.kind, serveDisabled,
+            restartRequired: true,
+            note: 'Restart the daemon to move the socket: systemctl restart outlaw-serverd',
+        };
+    },
+
+    // Put Tailscale's HTTPS proxy in front of the panel (or take it away).
+    'remote:serve': async (_ctx, { enabled } = {}) => {
+        const cfg = config.load();
+        if (enabled === false) {
+            const off = await remote.tailscaleServeOff();
+            const w = config.patch({ trustProxy: false });
+            if (!w.ok) return w;
+            return { ...off, ok: true, enabled: false, restartRequired: true };
+        }
+
+        const on = await remote.tailscaleServeOn(cfg.port);
+        if (!on.ok) return on;
+        // The proxy forwards to loopback, so that is where the daemon belongs.
+        const changes = { trustProxy: true };
+        if (!remote.isLoopback(cfg.host)) changes.host = '127.0.0.1';
+        const w = config.patch(changes);
+        if (!w.ok) return w;
+        return { ...on, enabled: true, movedToLoopback: changes.host === '127.0.0.1', restartRequired: true };
+    },
+
     // --- daemon self-description -------------------------------------------
 
-    'daemon:info': async (ctx) => ({
-        version: ctx.version,
-        mode: ctx.mode,               // 'panel' | 'lean'
-        uiEnabled: ctx.mode === 'panel',
-        bind: ctx.bind,
-        // Honest statement of what this build can do yet.
-        phase: 1,
-        note: 'Phase 1: local control only. Authentication + remote access land in phases 2-3.',
-    }),
+    'daemon:info': async (ctx) => {
+        const cfg = config.load();
+        return {
+            version: ctx.version,
+            mode: ctx.mode,               // 'panel' | 'lean'
+            uiEnabled: ctx.mode === 'panel',
+            bind: ctx.bind,
+            bindKind: remote.classifyBind(cfg.host).kind,
+            serve: cfg.trustProxy === true,
+            // Honest statement of what this build can do yet.
+            phase: 3,
+            note: 'Phase 3: local control, sign-in, and remote access over an encrypted tunnel. Server toolset and one-click game servers land in phases 4-5.',
+        };
+    },
 };
 
 // Dispatch one operation by name. Unknown names are refused (no reflection into

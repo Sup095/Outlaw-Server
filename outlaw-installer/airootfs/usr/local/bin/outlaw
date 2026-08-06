@@ -12,8 +12,10 @@
 # ============================================================================
 set -uo pipefail
 
-SERVERD_DIR="/usr/share/outlaw-serverd"
-CONFIG="/etc/outlaw-server/daemon.json"
+# Overridable so the CLI can be exercised outside a real install; the defaults
+# are the only paths that exist on a real one.
+SERVERD_DIR="${OUTLAW_SERVERD_DIR:-/usr/share/outlaw-serverd}"
+CONFIG="${OUTLAW_SERVERD_CONFIG:-/etc/outlaw-server/daemon.json}"
 
 usage() {
     cat <<'USAGE'
@@ -35,6 +37,14 @@ outlaw — Outlaw Server control
   outlaw 2fa <user> <code>   Confirm 2FA — required before it is enforced
   outlaw audit [n]           Recent sign-in / privileged-action records
   outlaw help                This text
+
+Remote access (reach this machine from anywhere, over an encrypted tunnel):
+  outlaw remote              Where things stand
+  outlaw remote up [--ssh]   Join your Tailscale network (prints a sign-in link)
+  outlaw remote down         Leave the tailnet (tailscaled keeps running)
+  outlaw remote off          Leave AND stop tailscaled — back to nothing running
+  outlaw remote bind <where> loopback | tunnel | <address>
+  outlaw remote serve on|off Front the panel with HTTPS inside your tailnet
 
 Modes:
   panel  browser control panel on http://127.0.0.1:7717 (easiest to configure)
@@ -60,7 +70,53 @@ op() {
 svc() {
     local action="$1" unit="${2:-}"
     if [[ -z "$unit" ]]; then echo "usage: outlaw $action <unit>" >&2; exit 2; fi
+    # Refuse anything that isn't a plausible unit name before it is pasted into
+    # a JSON string — a quote here would produce malformed JSON, not an error.
+    if [[ ! "$unit" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]]; then
+        echo "not a valid unit name: $unit" >&2; exit 2
+    fi
     op "services:action" "$(printf '{"unit":"%s","action":"%s"}' "$unit" "$action")"
+}
+
+# Human-readable remote-access summary. The JSON from `remote:status` is the
+# machine-readable version; this is the one an admin reads at 2am.
+remote_status() {
+    node -e '
+        const remote = require(process.argv[1] + "/remote");
+        const config = require(process.argv[1] + "/config");
+        remote.status(config.load()).then((s) => {
+            const ts = s.tailscale;
+            const state = !ts.installed ? "not installed"
+                : ts.connected ? "connected"
+                : ts.running ? (ts.state || "running, not signed in")
+                : "stopped";
+            console.log("Remote access");
+            console.log("  Tailscale   : " + state);
+            if (ts.ipv4)     console.log("  This machine: " + ts.ipv4 + (ts.dnsName ? "  (" + ts.dnsName + ")" : ""));
+            if (ts.peers)    console.log("  Tailnet     : " + ts.peers + " other device(s)");
+            if (ts.authUrl)  console.log("  Sign in at  : " + ts.authUrl);
+            if (s.wireguard.interfaces.length) console.log("  WireGuard   : " + s.wireguard.interfaces.join(", "));
+            console.log("  Panel binds : " + s.bind.host + ":" + s.bind.port + "  [" + s.bind.kind + (s.bind.allowed ? "" : " — REFUSED") + "]");
+            if (s.serve.enabled) console.log("  HTTPS proxy : on (tailscale serve)");
+            if (s.reachableAt.length) {
+                console.log("");
+                console.log("  Reachable at:");
+                for (const r of s.reachableAt) console.log("    " + r.url + "   — " + r.from);
+            }
+            if (!s.bind.allowed) {
+                console.log("");
+                console.log("  The daemon will REFUSE to start: " + s.bind.reason);
+                console.log("  Fix it with: sudo outlaw remote bind loopback");
+            } else if (ts.hint) {
+                console.log("");
+                console.log("  " + ts.hint);
+            }
+        }).catch((e) => { console.error("error:", e.message); process.exit(1); });
+    ' "$SERVERD_DIR"
+}
+
+need_root() {
+    if [[ $EUID -ne 0 ]]; then echo "that needs root: sudo outlaw $*" >&2; exit 1; fi
 }
 
 case "${1:-help}" in
@@ -145,6 +201,81 @@ case "${1:-help}" in
             if (!r.ok) { console.error(r.error); process.exit(1); }
             console.log("Two-factor authentication confirmed and now REQUIRED at sign-in.");
         ' "$SERVERD_DIR" "$user" "$code"
+        ;;
+    remote)
+        case "${2:-status}" in
+            status)
+                remote_status
+                ;;
+            up)
+                need_root remote up
+                if ! command -v tailscale >/dev/null 2>&1; then
+                    echo "Tailscale isn't installed yet. Install it with:" >&2
+                    echo "    sudo pacman -S tailscale" >&2
+                    exit 1
+                fi
+                # tailscaled has to be up before the CLI can talk to it, and
+                # enabled so remote access survives a reboot — which is rather
+                # the point.
+                systemctl enable --now tailscaled || { echo "could not start tailscaled" >&2; exit 1; }
+                echo "Joining your Tailscale network."
+                echo "A sign-in link will appear below — open it in any browser, on any device."
+                echo
+                # Run it in the foreground: it prints the URL and waits for you
+                # to authenticate, which is exactly the behaviour we want here.
+                if [[ "${3:-}" = "--ssh" ]]; then
+                    tailscale up --ssh || exit 1
+                else
+                    tailscale up || exit 1
+                fi
+                echo
+                echo "Connected. Next, choose where the panel listens:"
+                echo "    sudo outlaw remote bind tunnel     # reachable from your tailnet"
+                echo "    sudo outlaw remote serve on        # ...and with HTTPS + a real name"
+                ;;
+            down)
+                need_root remote down
+                tailscale down || exit 1
+                echo "Disconnected from the tailnet. tailscaled is still running."
+                echo "To stop it entirely: sudo outlaw remote off"
+                ;;
+            off)
+                need_root remote off
+                tailscale down 2>/dev/null || true
+                systemctl disable --now tailscaled || exit 1
+                # The panel must not be left pointing at an address that no
+                # longer exists, or the daemon refuses to start on next boot.
+                op "remote:bind" '{"target":"loopback"}' >/dev/null || true
+                systemctl restart outlaw-serverd 2>/dev/null || true
+                echo "Remote access off. Nothing is running, and the panel is back on loopback."
+                ;;
+            bind)
+                target="${3:-}"
+                if [[ -z "$target" ]]; then echo "usage: outlaw remote bind <loopback|tunnel|address>" >&2; exit 2; fi
+                if [[ ! "$target" =~ ^[A-Za-z0-9:._-]+$ ]]; then echo "not a valid target: $target" >&2; exit 2; fi
+                need_root remote bind "$target"
+                op "remote:bind" "$(printf '{"target":"%s"}' "$target")" || exit 1
+                systemctl restart outlaw-serverd 2>/dev/null || true
+                remote_status
+                ;;
+            serve)
+                want="${3:-}"
+                if [[ "$want" != "on" && "$want" != "off" ]]; then echo "usage: outlaw remote serve <on|off>" >&2; exit 2; fi
+                need_root remote serve "$want"
+                if [[ "$want" = "on" ]]; then
+                    op "remote:serve" '{"enabled":true}' || exit 1
+                else
+                    op "remote:serve" '{"enabled":false}' || exit 1
+                fi
+                systemctl restart outlaw-serverd 2>/dev/null || true
+                remote_status
+                ;;
+            *)
+                echo "unknown: outlaw remote ${2:-}" >&2
+                echo "try: status | up | down | off | bind | serve" >&2
+                exit 2
+                ;;
+        esac
         ;;
     audit)
         n="${2:-40}"

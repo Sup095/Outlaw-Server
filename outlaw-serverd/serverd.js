@@ -28,13 +28,18 @@
 // ever are), it is plain HTTP, and it needs no framing code — less surface, less
 // to get wrong. The stream exists only while a browser is actually open.
 //
-// SECURITY POSTURE FOR THIS PHASE — READ THIS
-// -------------------------------------------
-// Phase 1 has NO AUTHENTICATION YET. It therefore binds to 127.0.0.1 ONLY and
-// refuses to start on a non-loopback address: an unauthenticated control plane
-// must never be reachable from the network, even by accident. Password + TOTP
-// 2FA arrive in Phase 2 and remote access in Phase 3; only then does binding
-// beyond loopback become allowed.
+// SECURITY POSTURE — READ THIS
+// ----------------------------
+// The panel speaks plain HTTP, so it is only ever allowed to listen where plain
+// HTTP is safe:
+//
+//   * loopback — nothing leaves the machine, or
+//   * an address that provably belongs to a WireGuard/Tailscale interface,
+//     where WireGuard has already encrypted everything end-to-end.
+//
+// A LAN address, a public address or a wildcard bind is REFUSED and the daemon
+// exits. remote.js owns that decision; this file just obeys it. Sign-in
+// (password + TOTP) guards every operation on top of that.
 // ============================================================================
 'use strict';
 
@@ -43,30 +48,13 @@ const fs = require('fs');
 const path = require('path');
 const { dispatch } = require('./ops');
 const auth = require('./auth');
+const remote = require('./remote');
+const config = require('./config');
 
-const VERSION = '0.4.0';
-const CONFIG_PATH = process.env.OUTLAW_SERVERD_CONFIG || '/etc/outlaw-server/daemon.json';
-const DEFAULT_UI_DIR = '/usr/share/outlaw-server/ui';
+const VERSION = '0.5.0';
+const CONFIG_PATH = config.CONFIG_PATH;
 
-const DEFAULTS = {
-    mode: 'panel',          // 'panel' | 'lean'
-    port: 7717,
-    host: '127.0.0.1',      // Phase 1: loopback only, enforced below.
-    uiDir: DEFAULT_UI_DIR,
-};
-
-function loadConfig() {
-    let cfg = { ...DEFAULTS };
-    try {
-        const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') cfg = { ...cfg, ...parsed };
-    } catch { /* no config yet — defaults are correct for a fresh install */ }
-    if (cfg.mode !== 'lean') cfg.mode = 'panel';
-    const port = parseInt(cfg.port, 10);
-    cfg.port = (Number.isInteger(port) && port > 0 && port < 65536) ? port : DEFAULTS.port;
-    return cfg;
-}
+const loadConfig = config.load;
 
 // --- Server-sent events -----------------------------------------------------
 // Connected panels, so an operation can push a toast / progress line. The set
@@ -115,14 +103,62 @@ function serveStatic(cfg, urlPath, res) {
     });
 }
 
+// --- host-header allowlist --------------------------------------------------
+// Refuse requests that didn't ask for us by a name we recognise. This closes
+// DNS rebinding: a hostile page can point a name it controls at our address and
+// have the victim's own browser talk to the panel, but it cannot change the
+// Host header the browser sends. Cheap, and it costs a legitimate user nothing.
+
+function hostNameOf(req) {
+    let raw = String(req.headers.host || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('[')) {                    // [::1]:7717
+        const end = raw.indexOf(']');
+        return end > 0 ? raw.slice(1, end).toLowerCase() : '';
+    }
+    const colon = raw.lastIndexOf(':');
+    // A lone colon is a port separator; several means a bare IPv6 literal,
+    // which is malformed in a Host header and gets rejected below.
+    if (colon > 0 && raw.indexOf(':') === colon) raw = raw.slice(0, colon);
+    return raw.toLowerCase();
+}
+
+function buildHostAllowlist(cfg) {
+    const allow = new Set(['localhost', '127.0.0.1', '::1', 'ip6-localhost']);
+    if (cfg.host) allow.add(String(cfg.host).toLowerCase());
+    for (const t of remote.tunnels()) allow.add(t.address.toLowerCase());
+    for (const h of cfg.allowedHosts || []) allow.add(h);
+    return allow;
+}
+
+function hostIsAllowed(name, allow, trustProxy) {
+    if (!name) return false;
+    if (allow.has(name)) return true;
+    if (name.startsWith('127.')) return true;
+    // Behind Tailscale's HTTPS proxy the browser asks for the machine's MagicDNS
+    // name, which we can't know until the tailnet hands it out.
+    if (trustProxy && name.endsWith('.ts.net')) return true;
+    return false;
+}
+
 // --- auth plumbing ----------------------------------------------------------
 
-// The client's address, for session binding and rate limiting. We do NOT honour
-// X-Forwarded-For: nothing is meant to sit in front of this daemon, and
-// trusting that header would let a caller forge its own identity and sidestep
-// the lockout entirely.
-function clientIp(req) {
-    return (req.socket && (req.socket.remoteAddress || '')) || 'unknown';
+// The client's address, for session binding and rate limiting.
+//
+// X-Forwarded-For is IGNORED unless BOTH of these hold:
+//   * the admin explicitly enabled `tailscale serve` (which sets trustProxy), and
+//   * the request actually arrived from loopback, i.e. from the local proxy.
+// Trusting it any other time would let a caller forge its own identity and walk
+// straight past the lockout. When we do trust it, the raw peer is returned as a
+// second, much-more-tolerant lockout key so a local process can't brute-force
+// the panel by forging a fresh address on every attempt.
+function clientIp(req, cfg) {
+    const peer = (req.socket && (req.socket.remoteAddress || '')) || 'unknown';
+    if (cfg.trustProxy && remote.isLoopback(peer)) {
+        const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+        if (fwd) return { ip: fwd, peerKey: auth.PROXY_KEY };
+    }
+    return { ip: peer, peerKey: null };
 }
 
 function parseCookies(req) {
@@ -136,13 +172,15 @@ function parseCookies(req) {
     return out;
 }
 
-function sessionCookie(token, maxAgeSec) {
+function sessionCookie(token, maxAgeSec, secure) {
     // HttpOnly  — JavaScript can't read it, so an XSS can't exfiltrate it.
     // SameSite=Strict — a hostile page can't ride the session cross-site.
     // Path=/     — the whole control plane.
-    // (No Secure flag yet: this build is loopback-only plain HTTP. It gets set
-    //  when TLS lands with remote access, or the cookie would never be sent.)
-    return `outlaw_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}`;
+    // Secure     — only once something is actually terminating TLS in front of
+    //   us (`tailscale serve`). Setting it on a plain-HTTP bind would mean the
+    //   browser never sends the cookie back and nobody could stay signed in.
+    return `outlaw_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}`
+        + (secure ? '; Secure' : '');
 }
 
 function json(res, code, obj, extraHeaders = {}) {
@@ -180,21 +218,38 @@ function start() {
         return;
     }
 
-    // Sign-in exists as of Phase 2, but the transport is still plain HTTP —
-    // so binding to a network address would put the password on the wire in
-    // clear text. Loopback stays mandatory until Phase 3 provides an encrypted
-    // path (Tailscale/WireGuard, which encrypts end-to-end, or TLS).
-    if (cfg.host !== '127.0.0.1' && cfg.host !== '::1' && cfg.host !== 'localhost') {
-        console.error(`[outlaw-serverd] REFUSING to bind ${cfg.host}: the panel still speaks plain HTTP,`);
-        console.error('[outlaw-serverd] so off-loopback would send credentials in the clear.');
-        console.error('[outlaw-serverd] Encrypted remote access arrives in Phase 3 (Tailscale/WireGuard).');
+    // THE BIND GATE. Loopback, or an address that belongs to an encrypted
+    // tunnel. Anything else and we exit rather than start — a control plane that
+    // can reboot the machine does not get to be "temporarily" on the LAN.
+    const verdict = remote.classifyBind(cfg.host);
+    if (!verdict.allowed) {
+        console.error(`[outlaw-serverd] REFUSING to listen on ${cfg.host} — ${verdict.reason}.`);
+        console.error('[outlaw-serverd] Allowed: 127.0.0.1, or a Tailscale/WireGuard address on this machine.');
+        console.error('[outlaw-serverd] Set one up with:  sudo outlaw remote up  then  sudo outlaw remote bind tunnel');
         process.exit(1);
     }
 
+    // Forwarded-header trust is only coherent while we're on loopback with a
+    // local proxy in front. If the config says otherwise, the config is wrong —
+    // drop the trust rather than honour it on a network-facing socket.
+    if (cfg.trustProxy && verdict.kind !== 'loopback') {
+        console.warn('[outlaw-serverd] ignoring trustProxy: it only applies to a loopback bind behind a local proxy.');
+        cfg.trustProxy = false;
+    }
+
+    const hostAllowlist = buildHostAllowlist(cfg);
+
     const server = http.createServer(async (req, res) => {
+        // Reject an unrecognised Host before anything else looks at the request.
+        if (!hostIsAllowed(hostNameOf(req), hostAllowlist, cfg.trustProxy)) {
+            res.writeHead(421, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' })
+               .end('Misdirected request: this panel does not answer to that host name.');
+            return;
+        }
+
         const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
-        const ip = clientIp(req);
+        const { ip, peerKey } = clientIp(req, cfg);
 
         // ---- authentication endpoints (the only unauthenticated surface) ----
 
@@ -213,10 +268,10 @@ function start() {
             let body;
             try { body = JSON.parse(await readBody(req, 8 * 1024) || '{}'); }
             catch { json(res, 400, { ok: false, error: 'Bad request.' }); return; }
-            const r = auth.login({ user: body.user, password: body.password, code: body.code, ip });
+            const r = auth.login({ user: body.user, password: body.password, code: body.code, ip, peerKey });
             if (!r.ok) { json(res, 401, r); return; }
             json(res, 200, { ok: true, user: r.user },
-                 { 'Set-Cookie': sessionCookie(r.token, Math.floor(r.expiresInMs / 1000)) });
+                 { 'Set-Cookie': sessionCookie(r.token, Math.floor(r.expiresInMs / 1000), cfg.trustProxy) });
             return;
         }
 
@@ -283,7 +338,7 @@ function start() {
             const result = await dispatch(op, payload.args, { ...ctx, user: session.user });
             // Record what was actually done, by whom — reads are noise, so only
             // state-changing operations are audited.
-            if (/^(services:action|proc:kill|power:)/.test(op)) {
+            if (/^(services:action|proc:kill|power:|remote:(up|down|bind|serve))/.test(op)) {
                 auth.audit('op', { user: session.user, ip, op, args: payload.args || {}, ok: result.ok !== false });
             }
             json(res, 200, result);
@@ -312,9 +367,13 @@ function start() {
     });
 
     server.listen(cfg.port, cfg.host, () => {
-        console.log(`[outlaw-serverd] v${VERSION} — panel on http://${cfg.host}:${cfg.port}`);
+        const shown = cfg.host.includes(':') ? `[${cfg.host}]` : cfg.host;
+        console.log(`[outlaw-serverd] v${VERSION} — panel on http://${shown}:${cfg.port}`);
+        console.log(verdict.kind === 'loopback'
+            ? `[outlaw-serverd] loopback only${cfg.trustProxy ? ', fronted by tailscale serve (HTTPS)' : ' — reachable from this machine alone'}.`
+            : `[outlaw-serverd] reachable over your ${verdict.kind} tunnel (${verdict.iface}), encrypted end to end.`);
         console.log(auth.isConfigured()
-            ? '[outlaw-serverd] sign-in required. Loopback only until Phase 3 adds encrypted remote access.'
+            ? '[outlaw-serverd] sign-in required.'
             : '[outlaw-serverd] NO ADMINISTRATOR YET — open the panel (or run `outlaw passwd`) to create one.');
         console.log('[outlaw-serverd] idle cost: no timers, no polling.');
     });
@@ -333,4 +392,7 @@ function start() {
 }
 
 if (require.main === module) start();
-module.exports = { start, loadConfig, VERSION };
+module.exports = {
+    start, loadConfig, VERSION,
+    _internals: { hostNameOf, hostIsAllowed, buildHostAllowlist, clientIp, sessionCookie },
+};

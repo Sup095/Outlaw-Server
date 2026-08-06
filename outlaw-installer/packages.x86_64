@@ -35,6 +35,17 @@ pacman-contrib
 # --- Remote access (a server without SSH is a brick) ------------------------
 openssh
 
+# Encrypted private networking. This is how the control panel is reached from
+# anywhere without putting it on the public internet: the panel listens on the
+# tunnel address, and WireGuard encrypts everything end to end.
+#   tailscale       — managed WireGuard. Free tier (100 devices), open source.
+#   wireguard-tools — for admins who'd rather self-host and involve no third
+#                     party at all. Both are supported; neither costs money.
+# NEITHER runs by default. `outlaw remote up` starts and enables tailscaled;
+# until then nothing is listening and nothing is phoning anywhere.
+tailscale
+wireguard-tools
+
 # --- Bootloader + installer tooling ----------------------------------------
 syslinux
 grub
