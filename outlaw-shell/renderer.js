@@ -584,10 +584,10 @@ function showScreen(name) {
     }
     if (name === 'files') { _fsFilter = ''; const ff = $('#fs-filter'); if (ff) ff.value = ''; loadFiles(currentDir || null); }
     if (name === 'tasks') { refreshTasks(); startTasksPoll(); } else { stopTasksPoll(); }
-    if (name === 'dashboard') renderRecentApps();
+    if (name === 'dashboard') { renderRecentApps(); refreshDisks(); }
     if (name === 'apps') { loadAppsCatalog(); const as = $('#apps-search'); if (as) as.focus(); }
     if (name === 'help') { renderHelp(($('#help-search') || {}).value || ''); const hs = $('#help-search'); if (hs) hs.focus(); }
-    if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
+    if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); refreshSshKeys(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
     if (name === 'ai') $('#ai-in').focus();
     if (name === 'terminal') $('#term-in').focus();
     // Server screens load on arrival and on demand — never on a timer.
@@ -622,6 +622,15 @@ async function op(name, args) {
     } catch (e) {
         return { ok: false, error: (e && e.message) || String(e) };
     }
+}
+
+// "We couldn't read it" and "there is nothing to show" look identical once both
+// render as an empty list, and the empty one reads as reassurance. Every screen
+// below asks this before drawing a list, so a failure can never be mistaken for
+// a healthy, quiet machine. An op that simply isn't implemented yet (ok:false,
+// "Unknown operation") counts as unreadable too — it is not evidence of zero.
+function unreadable(r) {
+    return !r || r.ok === false || r.available === false;
 }
 
 // --- Services ---------------------------------------------------------------
@@ -661,7 +670,7 @@ async function refreshServices() {
     const r = await op('services:list');
     // "Couldn't read them" must never render as "there aren't any" — an empty
     // table over a failure reads as a healthy machine with nothing running.
-    if (r.ok === false || r.available === false) {
+    if (unreadable(r)) {
         if (body) body.innerHTML = `<tr><td colspan="5" class="muted">Couldn't read the service list: ${_escapeHtml(r.error || 'unknown error')}</td></tr>`;
         _svcCache = [];
         return;
@@ -692,7 +701,7 @@ async function refreshLogs() {
     const unit = (($('#log-unit') || {}).value || '').trim();
     const lines = parseInt((($('#log-lines') || {}).value || '200'), 10) || 200;
     const r = await op('logs:recent', unit ? { unit, lines } : { lines });
-    if (r.ok === false || r.available === false) {
+    if (unreadable(r)) {
         out.textContent = "Couldn't read the journal: " + (r.error || 'unknown error');
         return;
     }
@@ -715,9 +724,12 @@ async function refreshFirewall() {
     const sub = $('#fw-sub');
     const r = await op('firewall:status');
 
-    if (r.available === false) {
+    if (unreadable(r)) {
+        // Never leave the toggle usable here: showing "off" for a firewall we
+        // simply couldn't read would invite someone to "turn it on" when it may
+        // already be on, and imply the machine is currently unprotected.
         if (state) { state.textContent = 'unavailable'; state.className = 'badge'; }
-        if (tog) tog.disabled = true;
+        if (tog) { tog.disabled = true; tog.checked = false; }
         if (sub) sub.textContent = r.error || 'The firewall could not be read on this machine.';
         if (body) body.innerHTML = `<tr><td colspan="5" class="muted">${_escapeHtml(r.error || 'Firewall unavailable.')}</td></tr>`;
         return;
@@ -779,6 +791,86 @@ async function firewallDelete(num) {
     _fwMsg(r.ok === false ? (r.error || 'Could not delete that rule.') : `Rule ${num} deleted.`);
     if (r.ok !== false) toast(`Firewall rule ${num} deleted.`);
     refreshFirewall();
+}
+
+// --- Storage (dashboard card) -----------------------------------------------
+async function refreshDisks() {
+    const box = $('#disk-list');
+    if (!box) return;
+    const r = await op('system:disk');
+    const fss = (r && r.filesystems) || [];
+    if (unreadable(r)) { box.innerHTML = `<div class="muted">Couldn't read disk usage: ${_escapeHtml(r.error || 'unknown')}</div>`; return; }
+    if (!fss.length) { box.innerHTML = '<div class="muted">No filesystems reported.</div>'; return; }
+    box.innerHTML = fss.map((f) => {
+        // 90% is where "plenty of room" turns into "about to page someone".
+        const pctColour = f.usePct >= 90 ? 'var(--bad, #e66)'
+            : f.usePct >= 75 ? 'var(--warn, #ea0)'
+                : 'inherit';
+        return `<div style="margin:8px 0;">
+            <div class="row" style="font-size:12px;"><span class="mono">${_escapeHtml(f.mount)}</span><span class="spacer"></span>
+              <span class="mono dim">${_escapeHtml(f.used)} / ${_escapeHtml(f.size)}</span>
+              <span class="mono" style="color:${pctColour};">&nbsp;${f.usePct}%</span></div>
+            <div class="bar"><span style="width:${Math.min(100, f.usePct)}%"></span></div>
+        </div>`;
+    }).join('');
+}
+
+// --- SSH keys ---------------------------------------------------------------
+function _sshMsg(t) { const el = $('#ssh-key-msg'); if (el) el.textContent = t || ''; }
+
+async function refreshSshKeys() {
+    const box = $('#ssh-key-list');
+    if (!box) return;
+    const r = await op('ssh:keys');
+    if (unreadable(r)) {
+        box.innerHTML = `<div class="muted">Couldn't read the authorised keys: ${_escapeHtml(r.error || 'unknown error')}</div>`;
+        return;
+    }
+    const keys = r.keys || [];
+    if (!keys.length) {
+        box.innerHTML = '<div class="muted">No keys authorised yet — SSH will ask for a password.</div>';
+        return;
+    }
+    box.innerHTML = `<div class="dim" style="font-size:11px;margin-bottom:6px;">${keys.length} key(s) may log in as <span class="mono">${_escapeHtml(r.user || '')}</span></div>`
+        + keys.map((k) => `<div class="row" style="gap:8px;align-items:center;padding:4px 0;border-top:1px solid var(--line);">
+            <span class="mono">${_escapeHtml(k.type)}</span>
+            <span class="dim mono">…${_escapeHtml(k.short)}</span>
+            <span class="dim">${_escapeHtml(k.comment || '(no comment)')}</span>
+            ${k.valid ? '' : '<span class="badge" title="This line is not a plain public key — it was not written by this panel.">unrecognised</span>'}
+            <span class="spacer"></span>
+            <button class="danger" data-ssh-del="${k.index}" title="Revoke this key">Revoke</button>
+        </div>`).join('');
+}
+
+async function sshAddKey() {
+    const inp = $('#ssh-key-in');
+    const key = ((inp || {}).value || '').trim();
+    if (!key) { _sshMsg('Paste a public key first.'); return; }
+    // Catch the worst mistake before it ever leaves the browser.
+    if (/BEGIN [A-Z ]*PRIVATE KEY/.test(key)) {
+        _sshMsg('That is a PRIVATE key. Do not paste it anywhere — it is the half that must never leave your own machine. You want the matching .pub file.');
+        return;
+    }
+    _sshMsg('Authorising…');
+    const r = await op('ssh:add-key', { key });
+    if (r.ok === false) { _sshMsg(r.error || 'That key was refused.'); return; }
+    if (inp) inp.value = '';
+    _sshMsg(`Key authorised for ${r.user}.`);
+    toast('SSH key authorised.');
+    refreshSshKeys();
+}
+
+async function sshRemoveKey(index) {
+    const go = await askConfirm({
+        title: 'Revoke this SSH key?',
+        reason: 'Whoever holds the matching private key loses SSH access to this server. If that key is how YOU get in, make sure you have another way first — a password login, another key, or physical access.',
+        cmd: 'remove authorized_keys entry ' + index,
+    });
+    if (!go) return;
+    const r = await op('ssh:remove-key', { index });
+    _sshMsg(r.ok === false ? (r.error || 'Could not revoke that key.') : 'Key revoked.');
+    if (r.ok !== false) toast('SSH key revoked.');
+    refreshSshKeys();
 }
 
 // --- Remote access ----------------------------------------------------------
@@ -2997,6 +3089,8 @@ function wire() {
         if (svcBtn) { serviceAction(svcBtn.dataset.svc, svcBtn.dataset.svcAction); return; }
         const fwDel = e.target.closest('[data-fw-del]');
         if (fwDel) { firewallDelete(fwDel.dataset.fwDel); return; }
+        const sshDel = e.target.closest('[data-ssh-del]');
+        if (sshDel) { sshRemoveKey(sshDel.dataset.sshDel); return; }
 
         const act = e.target.closest('[data-action]');
         if (!act) return;
@@ -3013,6 +3107,7 @@ function wire() {
             case 'log-refresh': refreshLogs(); break;
             case 'fw-refresh': refreshFirewall(); break;
             case 'remote-refresh': refreshRemote(); break;
+            case 'disk-refresh': refreshDisks(); break;
             case 'ai-send': sendAI(); break;
             case 'updates-check': {
                 $('#update-status').textContent = 'checking…';
@@ -3433,6 +3528,8 @@ function wire() {
     { const f = $('#svc-filter'); if (f) f.addEventListener('input', renderServices); }
     { const u = $('#log-unit'); if (u) u.addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshLogs(); }); }
     { const n = $('#log-lines'); if (n) n.addEventListener('change', refreshLogs); }
+    { const b = $('#ssh-key-add'); if (b) b.addEventListener('click', sshAddKey); }
+    { const i = $('#ssh-key-in'); if (i) i.addEventListener('keydown', (e) => { if (e.key === 'Enter') sshAddKey(); }); }
     { const b = $('#fw-allow'); if (b) b.addEventListener('click', () => firewallAdd('allow')); }
     { const b = $('#fw-deny'); if (b) b.addEventListener('click', () => firewallAdd('deny')); }
     { const p = $('#fw-port'); if (p) p.addEventListener('keydown', (e) => { if (e.key === 'Enter') firewallAdd('allow'); }); }

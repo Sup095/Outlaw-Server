@@ -121,6 +121,13 @@
                 <h2>System</h2>
                 <div id="sysinfo" class="dim mono">Loading…</div>
             </div>
+            <div class="card">
+                <div class="row" style="align-items:center;"><h2 style="margin:0;">Storage</h2><span class="spacer"></span>
+                    <button data-action="disk-refresh">↻</button>
+                </div>
+                <div class="dim" style="font-size:11px;margin:4px 0 10px;">A server that runs out of disk stops serving — and usually stops logging why.</div>
+                <div id="disk-list"><div class="muted">Loading…</div></div>
+            </div>
             <h3>Launchers</h3>
             <div class="grid apps" id="launchers"></div>
             <h3 id="recent-title" hidden>Recent</h3>
@@ -536,6 +543,21 @@ sudo outlaw remote bind tunnel</pre>
                     </div>
                     <div id="pin-form-msg" class="muted" style="font-size:12px;"></div>
                 </div>
+            </div>
+
+            <div class="card" id="sshkeys-card">
+                <h3>SSH keys</h3>
+                <details class="page-help">
+                    <summary>What is this?</summary>
+                    <p>Public keys that may log into this server over SSH. A key here is <b>a login</b> — anyone holding the matching private key gets in, with no password. Keys are far safer than passwords for a server, because there is nothing guessable to brute-force.</p>
+                    <p>Paste the contents of your <span class="mono">.pub</span> file (usually <span class="mono">~/.ssh/id_ed25519.pub</span>). <b>Never paste a private key</b> — that is the half that stays on your own machine, and pasting it here would be handing it away.</p>
+                </details>
+                <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-start;">
+                    <input id="ssh-key-in" placeholder="ssh-ed25519 AAAA… you@laptop" autocomplete="off" spellcheck="false" style="flex:1 1 320px;min-width:220px;">
+                    <button id="ssh-key-add" class="primary" type="button">Authorise</button>
+                </div>
+                <div id="ssh-key-msg" class="muted mono" style="margin-top:8px;word-break:break-word;"></div>
+                <div id="ssh-key-list" style="margin-top:10px;"></div>
             </div>
 
             <div class="card">

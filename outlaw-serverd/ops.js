@@ -24,6 +24,7 @@
 
 const os = require('os');
 const fs = require('fs');
+const path = require('path');
 const { run } = require('./exec');
 const remote = require('./remote');
 const config = require('./config');
@@ -76,6 +77,37 @@ function cpuLoad() {
 // before it reaches the system.
 const UNIT_RE = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}(\.(service|socket|timer|target|mount|path))?$/;
 
+// An SSH public key we're willing to write into authorized_keys.
+//
+// ANCHORED AT THE START ON PURPOSE. The real file format allows a leading
+// options field (command="…", environment="…", permitopen=…) that executes on
+// every login — so a line beginning with anything other than a known key type
+// is refused rather than parsed. Base64 body, then an optional free-text
+// comment. No newlines: the caller gets one key per call.
+const SSH_KEY_RE = new RegExp(
+    '^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(?:256|384|521)'
+    + '|sk-ssh-ed25519@openssh\\.com|sk-ecdsa-sha2-nistp256@openssh\\.com)'
+    + '\\s+[A-Za-z0-9+/]{32,}={0,3}'      // the key body
+    + '(?:\\s+[^\\r\\n]{1,200})?$',        // optional comment
+);
+
+// The account someone actually logs into over SSH. The daemon runs as root, so
+// "the user's keys" has to be resolved rather than assumed — uid 1000 is the
+// account the installer creates.
+function primaryUser() {
+    for (const line of readFileSafe('/etc/passwd').split('\n')) {
+        const p = line.split(':');
+        if (p.length >= 6 && Number(p[2]) === 1000) {
+            return { name: p[0], uid: Number(p[2]), gid: Number(p[3]), home: p[5] };
+        }
+    }
+    return null;
+}
+
+function authorizedKeysPath(u) {
+    return path.join(u.home || ('/home/' + u.name), '.ssh', 'authorized_keys');
+}
+
 // ============================================================================
 // Operations
 // ============================================================================
@@ -113,9 +145,15 @@ const ops = {
     },
 
     'system:disk': async () => {
-        if (!IS_LINUX) return { filesystems: [] };
+        if (!IS_LINUX) return { ok: true, available: false, filesystems: [], error: 'Runs on Outlaw Server.' };
         // -P = POSIX output (one line per fs, never wrapped) -> safe to parse.
         const r = await run('df', ['-PhT', '-x', 'tmpfs', '-x', 'devtmpfs', '-x', 'squashfs']);
+        if (!r.ok) {
+            return {
+                ok: true, available: false, filesystems: [],
+                error: (r.stderr || r.stdout || 'df did not answer').trim().slice(-200),
+            };
+        }
         const filesystems = r.stdout.split('\n').slice(1).map((line) => {
             const p = line.trim().split(/\s+/);
             if (p.length < 7) return null;
@@ -124,7 +162,7 @@ const ops = {
                 avail: p[4], usePct: parseInt(p[5], 10) || 0, mount: p.slice(6).join(' '),
             };
         }).filter(Boolean);
-        return { filesystems };
+        return { ok: true, available: true, filesystems };
     },
 
     'system:processes': async () => {
@@ -241,6 +279,101 @@ const ops = {
         if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
         const r = await run('systemctl', ['poweroff'], { timeout: 10000 });
         return r.ok ? { ok: true } : { ok: false, error: (r.stderr || 'shutdown failed').slice(-200) };
+    },
+
+    // --- SSH keys -----------------------------------------------------------
+    // An authorized_keys line IS a login. Treat this file as the most dangerous
+    // thing the panel can write, because it is.
+    //
+    // The format allows a leading OPTIONS field — command="…", environment="…",
+    // permitopen=… — which runs on connect. Accepting a pasted line verbatim
+    // would let anything in that field execute as the account. So we accept
+    // ONLY a bare "<type> <base64> [comment]" and refuse everything else,
+    // including any line that begins with an option. Multi-line input is
+    // refused outright: one call, one key.
+
+    'ssh:keys': async () => {
+        if (!IS_LINUX) return { ok: true, available: false, keys: [], error: 'Runs on Outlaw Server.' };
+        const u = primaryUser();
+        if (!u) return { ok: true, available: false, keys: [], error: 'No login account found to read keys for.' };
+        const txt = readFileSafe(authorizedKeysPath(u));
+        const keys = txt.split('\n').map((line, i) => {
+            const t = line.trim();
+            if (!t || t.startsWith('#')) return null;
+            const parts = t.split(/\s+/);
+            return {
+                index: i,
+                type: parts[0] || '',
+                comment: parts.slice(2).join(' '),
+                // Short, stable identifier so a key can be recognised without
+                // showing the whole blob.
+                short: (parts[1] || '').slice(-16),
+                valid: SSH_KEY_RE.test(t),
+            };
+        }).filter(Boolean);
+        return { ok: true, available: true, user: u.name, path: authorizedKeysPath(u), keys };
+    },
+
+    'ssh:add-key': async (_ctx, { key } = {}) => {
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
+        const u = primaryUser();
+        if (!u) return { ok: false, error: 'No login account found to add a key to.' };
+        const raw = String(key == null ? '' : key).trim();
+        if (!raw) return { ok: false, error: 'Paste a public key first.' };
+        if (/[\r\n]/.test(raw)) {
+            return { ok: false, error: 'That looks like more than one line. Add one key at a time — a second line could smuggle in login options.' };
+        }
+        if (!SSH_KEY_RE.test(raw)) {
+            return {
+                ok: false,
+                error: 'That is not a plain public key. Expected something like "ssh-ed25519 AAAAC3Nza… you@laptop". '
+                     + 'Keys carrying options (command=, environment=, …) are refused on purpose: those run on every login. '
+                     + 'Also check you pasted the .pub file and not a PRIVATE key.',
+            };
+        }
+        const p = authorizedKeysPath(u);
+        const existing = readFileSafe(p);
+        const blob = raw.split(/\s+/)[1];
+        if (existing.split('\n').some((l) => l.trim().split(/\s+/)[1] === blob)) {
+            return { ok: false, error: 'That key is already authorised.' };
+        }
+        try {
+            fs.mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
+            fs.appendFileSync(p, (existing && !existing.endsWith('\n') ? '\n' : '') + raw + '\n', { mode: 0o600 });
+            // sshd refuses to use a key file that others can write, and the
+            // daemon runs as root — so fix ownership and modes explicitly
+            // rather than leaving a file the account can't be trusted with.
+            fs.chmodSync(p, 0o600);
+            fs.chmodSync(path.dirname(p), 0o700);
+            if (Number.isInteger(u.uid) && Number.isInteger(u.gid)) {
+                fs.chownSync(path.dirname(p), u.uid, u.gid);
+                fs.chownSync(p, u.uid, u.gid);
+            }
+        } catch (e) {
+            return { ok: false, error: 'Could not write the key file: ' + e.message };
+        }
+        return { ok: true, user: u.name };
+    },
+
+    'ssh:remove-key': async (_ctx, { index } = {}) => {
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
+        const u = primaryUser();
+        if (!u) return { ok: false, error: 'No login account found.' };
+        const raw = String(index == null ? '' : index).trim();
+        if (!/^\d{1,5}$/.test(raw)) return { ok: false, error: 'Invalid key number.' };
+        const n = Number(raw);
+        const p = authorizedKeysPath(u);
+        const lines = readFileSafe(p).split('\n');
+        if (n < 0 || n >= lines.length || !lines[n].trim()) return { ok: false, error: 'No key at that position — reload the list.' };
+        lines.splice(n, 1);
+        try {
+            fs.writeFileSync(p, lines.join('\n').replace(/\n+$/, '\n'), { mode: 0o600 });
+            fs.chmodSync(p, 0o600);
+            if (Number.isInteger(u.uid) && Number.isInteger(u.gid)) fs.chownSync(p, u.uid, u.gid);
+        } catch (e) {
+            return { ok: false, error: 'Could not rewrite the key file: ' + e.message };
+        }
+        return { ok: true, removed: n };
     },
 
     // --- firewall (ufw) -----------------------------------------------------
@@ -419,7 +552,7 @@ const ops = {
             serve: cfg.trustProxy === true,
             // Honest statement of what this build can do yet.
             phase: 4,
-            note: 'Phase 4: sign-in, remote access over an encrypted tunnel, and the core server tools (services, journal, firewall). SSH keys, a storage screen and one-click game servers are still to come.',
+            note: 'Phase 4: sign-in, remote access over an encrypted tunnel, and the server toolset (services, journal, firewall, SSH keys, storage). One-click game servers land in phase 5.',
         };
     },
 };

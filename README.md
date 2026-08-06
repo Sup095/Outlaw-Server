@@ -53,7 +53,7 @@ guarded terminal.
 | ✅ | **1 · Headless daemon** | `outlaw-serverd`: the control panel served over HTTP; **the UI itself is now optional** (see below). |
 | ✅ | **2 · Sign-in that means it** | Password (scrypt) + TOTP 2FA, revocable server-side sessions, per-IP lockout, audit log. |
 | ✅ | **3 · Remote access** | Tailscale/WireGuard — manage every box from anywhere, with nothing on the public internet. |
-| 🚧 | **4 · Server toolset** | Services manager, firewall and journal viewer are **in**. SSH keys and a storage screen still to come. |
+| ✅ | **4 · Server toolset** | Services, journal viewer, firewall, SSH keys and storage — all reachable from either frontend. |
 | 🔭 | **5 · Game servers** | One-click Pterodactyl (+ Docker), optional Portainer & Cockpit — all removable. |
 | 🔭 | **6 · Polish & first install** | Accessibility pass, docs, and the first real-hardware test. |
 

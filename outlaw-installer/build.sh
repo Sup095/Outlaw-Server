@@ -20,7 +20,7 @@ RELENG="/usr/share/archiso/configs/releng"
 # Default version baked in for local builds. CI overrides this from the git
 # tag via OUTLAW_ISO_VERSION (see .github/workflows/build-iso.yml) so the
 # artifact filename always matches the tag the user pushed.
-ISO_VERSION="${OUTLAW_ISO_VERSION:-0.7.0}"
+ISO_VERSION="${OUTLAW_ISO_VERSION:-0.7.1}"
 ISO_FINAL="$OUT_DIR/outlaw-server-v${ISO_VERSION}.iso"
 
 echo "========================================"
