@@ -20,7 +20,7 @@ RELENG="/usr/share/archiso/configs/releng"
 # Default version baked in for local builds. CI overrides this from the git
 # tag via OUTLAW_ISO_VERSION (see .github/workflows/build-iso.yml) so the
 # artifact filename always matches the tag the user pushed.
-ISO_VERSION="${OUTLAW_ISO_VERSION:-0.2.0}"
+ISO_VERSION="${OUTLAW_ISO_VERSION:-0.3.0}"
 ISO_FINAL="$OUT_DIR/outlaw-server-v${ISO_VERSION}.iso"
 
 echo "========================================"
@@ -111,9 +111,24 @@ if [[ -d "$REPO_ROOT/outlaw-installer-gui" ]]; then
     rm -rf "$PROFILE_DIR/airootfs/usr/share/outlaw-installer-gui/node_modules" 2>/dev/null || true
 fi
 
-# [4/7] intentionally left empty. Outlaw OS bundled the CodeMaker game-dev tool
-# here; Outlaw Server has no Dev session and ships no game-dev stack.
-echo "[4/7] (no extra bundles — server build)"
+# The control daemon (Phase 1). Zero npm dependencies, so this is a plain copy —
+# nothing to install or build. It serves the panel UI and runs every privileged
+# operation; in `lean` mode it listens for nothing at all.
+echo "[4/7] Syncing the control daemon…"
+if [[ -d "$REPO_ROOT/outlaw-serverd" ]]; then
+    install -d "$PROFILE_DIR/airootfs/usr/share/outlaw-serverd"
+    cp -rT "$REPO_ROOT/outlaw-serverd" "$PROFILE_DIR/airootfs/usr/share/outlaw-serverd"
+    rm -rf "$PROFILE_DIR/airootfs/usr/share/outlaw-serverd/node_modules" 2>/dev/null || true
+    # The panel UI the daemon serves in a browser = the same shell sources.
+    install -d "$PROFILE_DIR/airootfs/usr/share/outlaw-server/ui"
+    cp -rT "$REPO_ROOT/outlaw-shell" "$PROFILE_DIR/airootfs/usr/share/outlaw-server/ui"
+    rm -rf "$PROFILE_DIR/airootfs/usr/share/outlaw-server/ui/node_modules" 2>/dev/null || true
+    # In a browser there is no preload bridge, so the UI loads web-bridge.js
+    # instead. Same window.outlaw shape, HTTP transport.
+    cp "$REPO_ROOT/outlaw-serverd/web-bridge.js" "$PROFILE_DIR/airootfs/usr/share/outlaw-server/ui/web-bridge.js"
+else
+    echo "  ⚠ outlaw-serverd/ not found — building without the control daemon."
+fi
 
 # Enable services + live autologin-to-shell (creating symlinks on Linux side)
 echo "[5/7] Enabling services and autologin…"
@@ -146,7 +161,7 @@ sed -i \
 #   outlaw-electron-flags  — emits per-host Electron CLI flags (VM detection
 #                            for --disable-gpu so VBox doesn't black-screen).
 #   outlaw-firstboot       — launches the first-boot setup wizard.
-for f in outlaw-install outlaw-install-aur outlaw-electron-flags \
+for f in outlaw outlaw-install outlaw-install-aur outlaw-electron-flags \
          outlaw-firstboot outlaw-start-session outlaw-hotswap outlaw-perf \
          outlaw-tune outlaw-update-apply outlaw-update-rollback outlaw-greeter \
          outlaw-session-watchdog \

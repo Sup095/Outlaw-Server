@@ -73,6 +73,11 @@ fuse2
 ttf-jetbrains-mono
 noto-fonts
 
+# --- The control daemon -----------------------------------------------------
+# outlaw-serverd runs on plain Node with ZERO npm dependencies, so this single
+# package is the entire runtime for the control panel + the `outlaw` CLI.
+nodejs
+
 # --- Build tooling (AUR helper + on-demand server software) -----------------
 base-devel
 python

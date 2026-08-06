@@ -1,0 +1,34 @@
+[Unit]
+Description=Outlaw Server control daemon
+Documentation=https://github.com/Sup095/Outlaw-Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /usr/share/outlaw-serverd/serverd.js
+# In lean mode the daemon prints how to switch modes and exits 0 on purpose.
+# on-failure (not always) means that clean exit is respected instead of being
+# restarted in a loop.
+Restart=on-failure
+RestartSec=3
+
+# --- Hardening --------------------------------------------------------------
+# The daemon manages the machine, so it needs real privilege — but nothing
+# beyond that. These directives cost nothing at runtime and shrink what a
+# compromised daemon could reach.
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# It must read/write its own config and serve the UI; everything else on / is
+# read-only to it.
+ProtectSystem=full
+ReadWritePaths=/etc/outlaw-server /var/lib/outlaw-server
+
+[Install]
+WantedBy=multi-user.target

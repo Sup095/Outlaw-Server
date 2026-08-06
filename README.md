@@ -48,13 +48,74 @@ guarded terminal.
 
 | | Phase | What you get |
 |:--:|:--|:--|
-| 🚧 | **0 · Fork & strip** | The desktop OS cut down to a bootable, bare-bones server shell. |
-| 🔭 | **1 · Headless daemon** | `outlaw-serverd`: the control panel served over HTTPS/WebSocket; Electron removed; local display = optional kiosk browser. |
+| ✅ | **0 · Fork & strip** | The desktop OS cut down to a bootable, bare-bones server OS. |
+| 🚧 | **1 · Headless daemon** | `outlaw-serverd`: the control panel served over HTTP/WebSocket; Electron removed; **the UI itself becomes optional** (see below). |
 | 🔭 | **2 · Sign-in that means it** | Password + TOTP 2FA, session tokens, TLS, rate-limiting, audit log of every remote action. |
 | 🔭 | **3 · Remote access** | Tailscale/WireGuard integration — manage every box from anywhere, with nothing on the public internet. |
 | 🔭 | **4 · Server toolset** | Services manager, firewall, journal/log viewer, SSH keys, storage, live resource dashboard. |
 | 🔭 | **5 · Game servers** | One-click Pterodactyl (+ Docker), optional Portainer & Cockpit — all removable. |
 | 🔭 | **6 · Polish & first install** | Accessibility pass, docs, and the first real-hardware test. |
+
+### Your server, your overhead
+
+From Phase 1 on, **the control panel is optional**. Every install picks a mode, and can
+switch later:
+
+- **Panel mode** — the full browser UI: click through updates, services, logs, game
+  servers. Easiest to run and configure. Costs a little RAM for the daemon.
+- **Lean mode** — no UI at all. SSH + the `outlaw` command-line tool. Nothing is
+  listening for a browser, nothing renders, nothing polls.
+
+Either way the OS itself stays out of your way: **no background work when nothing is
+being asked of it.** No idle timers, no telemetry, no polling loops — the resources
+belong to what you're actually serving.
+
+---
+
+## 🧪 Experimental — after the roadmap
+
+Ideas we intend to build once the core OS is solid. **Nothing here is started**, and
+anything in this section may change shape or be dropped. Listed so the direction is
+public, not as a promise.
+
+### X1 · Watchdog & Guard Dog — two AIs that watch each other
+
+A pair of small local AIs that watch the server for security threats. They are
+deliberately **two** models, not one, because the whole design rests on them
+**checking each other's work**:
+
+- **🐕‍🦺 Watchdog — the one that notices.** Watches logs, auth attempts, processes,
+  network activity and file changes, and identifies anything that looks like a threat.
+  On a big enough model it also *suggests* what to do about it.
+- **🦮 Guard Dog — the one that acts.** Independently verifies that what Watchdog
+  flagged is a *real* threat (not a hallucination), builds **its own** list of possible
+  responses, compares that against Watchdog's suggestions, and puts the best options
+  forward.
+
+**The admin stays in charge.** Anything above a low-level threat is never acted on
+silently — you get a message describing what was found and a short list of concrete
+options to choose from. That is the point: two independent models must agree, and then
+a *human* decides. A single confused model can't take your server down.
+
+You can opt specific, easily-scoped responses into running **automatically** (say,
+blocking an IP after a brute-force burst) — with heavy warnings at the point you enable
+them, because automatic action is inherently risky.
+
+**Why two models, specifically:**
+- **Fewer hallucinations** — one model's claim has to survive the other's review before
+  it reaches you.
+- **Harder to turn against you** — each model inspects what the *other* is trying to
+  output, so a prompt-injection or poisoned log line that hijacks one has to get past
+  the other to reach the server. (This mutual check needs models with enough capacity
+  to reason about it — see below.)
+- **Blast radius** — both run **inside Docker containers**, so even a fully compromised
+  AI is boxed away from the host.
+
+**Sized to your hardware.** There'll be preset model choices tuned for whatever GPU (or
+CPU) the box has. Bigger models unlock more: richer response options, finer-grained
+controls, and the cross-checking behaviour above. On the smallest models some of that
+isn't realistic — so the presets say plainly what each tier can and can't do, rather
+than pretending capability it doesn't have.
 
 ## License
 

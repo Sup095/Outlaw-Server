@@ -72,6 +72,11 @@ ESSENTIAL_PKGS=(
   # Removable storage — USB drives for backups/restores.
   udisks2 gvfs xdg-user-dirs
 
+  # The control daemon runtime. outlaw-serverd has ZERO npm dependencies, so
+  # this one package covers both the browser panel and the `outlaw` CLI — and
+  # in lean mode it is all that's needed (nothing listens).
+  nodejs
+
   # Build tooling for on-demand server software (and the AUR helper).
   python base-devel
 
@@ -661,6 +666,12 @@ systemctl enable systemd-timesyncd
 # until asked, and unloads immediately after answering (keep_alive: 0), so an
 # idle server pays nothing for it. Guarded so a missing unit can't abort.
 systemctl enable ollama 2>/dev/null || true
+# The control daemon. In the default `panel` mode it serves the browser panel on
+# loopback; in `lean` mode it exits immediately and listens for nothing (see
+# /etc/outlaw-server/daemon.json, or run `outlaw mode lean`). Either way it does
+# NO background work — no timers, no polling.
+systemctl enable outlaw-serverd 2>/dev/null || true
+install -d -m 755 /var/lib/outlaw-server 2>/dev/null || true
 
 # Cap the systemd stop timeout so a slow-to-exit graphical session can't hang
 # shutdown/reboot for ~90s ("a stop job is running…" / watchdog messages).

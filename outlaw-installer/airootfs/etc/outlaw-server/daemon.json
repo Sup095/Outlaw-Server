@@ -1,0 +1,7 @@
+{
+  "_comment": "Outlaw Server daemon config. mode: 'panel' = browser control panel; 'lean' = no UI and no listener at all (SSH + the `outlaw` CLI only). Switch any time, then: systemctl restart outlaw-serverd",
+  "mode": "panel",
+  "host": "127.0.0.1",
+  "port": 7717,
+  "uiDir": "/usr/share/outlaw-server/ui"
+}

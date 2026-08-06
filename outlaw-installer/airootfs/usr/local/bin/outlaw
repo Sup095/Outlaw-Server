@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# ============================================================================
+# outlaw — the Outlaw Server command line
+# ----------------------------------------------------------------------------
+# Everything the control panel can do, from a terminal. This is the WHOLE
+# interface in `lean` mode (no UI, no listener), and a convenience in panel
+# mode. It talks to the same operations registry the panel does, so the two can
+# never drift apart.
+#
+# In lean mode nothing is listening, so we run the operation directly through
+# Node instead of over HTTP — no daemon required.
+# ============================================================================
+set -uo pipefail
+
+SERVERD_DIR="/usr/share/outlaw-serverd"
+CONFIG="/etc/outlaw-server/daemon.json"
+
+usage() {
+    cat <<'USAGE'
+outlaw — Outlaw Server control
+
+  outlaw status              Machine summary (host, kernel, CPU, RAM, uptime)
+  outlaw stats               Live CPU load / RAM / uptime
+  outlaw disk                Filesystem usage
+  outlaw services            List systemd services
+  outlaw start   <unit>      Start a service
+  outlaw stop    <unit>      Stop a service
+  outlaw restart <unit>      Restart a service
+  outlaw enable  <unit>      Enable a service at boot
+  outlaw disable <unit>      Disable a service at boot
+  outlaw logs [unit] [n]     Recent journal lines (default 200)
+  outlaw mode [panel|lean]   Show or set the control-panel mode
+  outlaw help                This text
+
+Modes:
+  panel  browser control panel on http://127.0.0.1:7717 (easiest to configure)
+  lean   no UI and no listener at all — SSH + this command only
+USAGE
+}
+
+# Run one operation through the shared registry and pretty-print the JSON.
+op() {
+    local name="$1"; shift
+    local args="${1:-{\}}"
+    node -e '
+        const { dispatch } = require(process.argv[1] + "/ops");
+        const [, , name, argsJson] = process.argv;
+        let args = {};
+        try { args = JSON.parse(argsJson || "{}"); } catch {}
+        dispatch(name, args, { version: "cli", mode: "cli", bind: "-" })
+          .then((r) => { console.log(JSON.stringify(r, null, 2)); process.exit(r && r.ok === false ? 1 : 0); })
+          .catch((e) => { console.error("error:", e.message); process.exit(1); });
+    ' "$SERVERD_DIR" "$name" "$args"
+}
+
+svc() {
+    local action="$1" unit="${2:-}"
+    if [[ -z "$unit" ]]; then echo "usage: outlaw $action <unit>" >&2; exit 2; fi
+    op "services:action" "$(printf '{"unit":"%s","action":"%s"}' "$unit" "$action")"
+}
+
+case "${1:-help}" in
+    status)   op "system:info" ;;
+    stats)    op "system:stats" ;;
+    disk)     op "system:disk" ;;
+    services) op "services:list" ;;
+    start|stop|restart|enable|disable) svc "$1" "${2:-}" ;;
+    logs)
+        unit="${2:-}"; lines="${3:-200}"
+        if [[ -n "$unit" ]]; then
+            op "logs:recent" "$(printf '{"unit":"%s","lines":%s}' "$unit" "$lines")"
+        else
+            op "logs:recent" "$(printf '{"lines":%s}' "$lines")"
+        fi
+        ;;
+    mode)
+        want="${2:-}"
+        if [[ -z "$want" ]]; then
+            if [[ -r "$CONFIG" ]]; then
+                node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).mode||"panel")}catch{console.log("panel (no config)")}' "$CONFIG"
+            else
+                echo "panel (no config file yet)"
+            fi
+            exit 0
+        fi
+        if [[ "$want" != "panel" && "$want" != "lean" ]]; then
+            echo "mode must be 'panel' or 'lean'" >&2; exit 2
+        fi
+        if [[ $EUID -ne 0 ]]; then echo "changing the mode needs root: sudo outlaw mode $want" >&2; exit 1; fi
+        mkdir -p "$(dirname "$CONFIG")"
+        node -e '
+            const fs = require("fs");
+            const [, , p, mode] = process.argv;
+            let cfg = {};
+            try { cfg = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+            cfg.mode = mode;
+            fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
+        ' "$CONFIG" "$want" || { echo "could not write $CONFIG" >&2; exit 1; }
+        systemctl restart outlaw-serverd 2>/dev/null || true
+        if [[ "$want" = "panel" ]]; then
+            echo "Panel mode. Control panel: http://127.0.0.1:7717"
+        else
+            echo "Lean mode. Nothing is listening — manage this server over SSH or with 'outlaw'."
+        fi
+        ;;
+    help|-h|--help) usage ;;
+    *) echo "unknown command: $1" >&2; echo; usage; exit 2 ;;
+esac
