@@ -26,125 +26,73 @@
 set -uo pipefail
 
 # ESSENTIAL_PKGS — the MINIMUM set needed to (a) boot the installed system,
-# (b) bring up the Electron shell + greeter, and (c) run Outlaw CodeMaker.
-# Everything else lives in optional bundles that the first-boot wizard
-# (/usr/share/outlaw-firstboot) lets the user opt into on first login.
+# (b) bring up the Outlaw Server panel, and (c) manage the box remotely.
+# Everything a particular server actually serves (Docker, Pterodactyl,
+# Portainer, Cockpit, Tailscale …) installs ON DEMAND after setup, so the
+# base install stays small and every admin only pays for what they use.
 #
-# Why split? A failure in any single package causes pacstrap to abort and
-# leaves the user with a half-installed system. Keeping the install slim
-# shrinks the failure surface and lets users decline things they don't
-# want (e.g. gaming users who don't need Godot, devs who don't want Steam).
-# steamcmd remains AUR-only — see Outlaw CodeMaker/core/aur_install.py.
+# Why so slim? A failure in any single package aborts pacstrap and leaves a
+# half-installed system. Fewer packages = smaller failure surface = a server
+# that comes back up. Nothing here is desktop fluff: no audio stack, no
+# Bluetooth, no browser, no compositor/taskbar/launcher, no OCR.
 ESSENTIAL_PKGS=(
   # Base system
   base linux linux-firmware intel-ucode amd-ucode mkinitcpio
-  sudo polkit networkmanager curl wget git nano
-  # pacman-contrib: provides `checkupdates` (safe update check without touching
-  # the live DB), used by the System Package Updates panel.
-  pacman-contrib
-  # zram-generator: compressed-RAM swap that outlaw-tune ("Tune This PC")
-  # enables on low-memory machines. No effect unless tuning writes its config.
-  zram-generator
 
-  # Bootloader / install tooling
+  # Privilege + networking
+  sudo polkit polkit-gnome networkmanager
+
+  # Core CLI. rsync + htop are the two tools every admin reaches for; the
+  # rest are needed by the panel's own helpers.
+  curl wget git nano rsync htop pacman-contrib zram-generator
+
+  # Remote access. openssh is NOT optional on a server — it is the fallback
+  # that lets the machine be fixed when the panel itself is unreachable.
+  # sshd is enabled below (key-based logins; see the post-install notes).
+  openssh
+
+  # Bootloader + partition tooling (installer + recovery)
   grub efibootmgr os-prober dosfstools mtools gptfdisk parted
 
-  # Security hardening
+  # Security. AppArmor profiles, firejail sandboxing, and the ufw firewall
+  # the panel's firewall screen drives.
   apparmor firejail ufw
 
-  # X / desktop runtime
-  xorg-server xorg-xinit picom feh rofi thunar xfce4-terminal electron
-  # openbox (tiny WM: title bars / minimize / maximize / close) + tint2 (taskbar
-  # for minimized windows). Guarded in .xinitrc — absent = old no-WM kiosk.
-  openbox tint2
-  # polkit-gnome: authentication agent so `pkexec pacman …` (Apps panel +
-  # updater) can prompt for the password. The session has no WM/agent
-  # otherwise, which makes package installs fail on the installed system.
-  polkit-gnome
-  # fuse2: lets AppImages (e.g. the LM Studio download) mount and run. The
-  # outlaw-lm-studio launcher also falls back to --appimage-extract-and-run, but
-  # native FUSE mounting is faster and fixes double-clicking AppImages in Files.
-  fuse2
-  # Audio — the PipeWire stack (modern Arch default). WITHOUT THIS THE INSTALLED
-  # SYSTEM HAS NO SOUND. pipewire-pulse / pipewire-alsa give Pulse/ALSA app
-  # compatibility (games, browsers, Godot); wireplumber is the session manager;
-  # alsa-utils provides amixer/alsactl and backs the desktop's volume control.
-  # Socket-activated by the user's systemd instance on login (pam_systemd) — no
-  # manual start needed. Verify on a test pass: play any sound + the topbar slider.
-  pipewire pipewire-pulse pipewire-alsa wireplumber alsa-utils
-  ttf-jetbrains-mono noto-fonts mesa
-  # Xorg video fallbacks. Primary path is modesetting over the GPU's KMS
-  # driver (vmwgfx / vboxvideo / real GPU); these two are auto-fallbacks Xorg
-  # tries if that can't open a screen: vesa (real-mode VESA BIOS) and fbdev
-  # (/dev/fb0). No forced driver, no nomodeset. (xf86-video-vmware was dropped
-  # from the Arch repos; vmwgfx in-kernel covers VMSVGA.)
-  xf86-video-vesa xf86-video-fbdev
+  # Minimal X — exists ONLY so an attached monitor can show this machine's own
+  # control panel. Headless servers never start it. openbox is optional (the
+  # panel runs kiosk-style without a WM) and xfce4-terminal backs the
+  # "open a real terminal" helper.
+  xorg-server xorg-xinit xf86-video-vesa xf86-video-fbdev mesa
+  openbox xfce4-terminal electron fuse2
+  ttf-jetbrains-mono noto-fonts
 
-  # VirtualBox compatibility. The kernel modules auto-load only when VBox
-  # is detected on boot, so this is harmless on real hardware — but for
-  # users testing the ISO in VBox / VBox-based VMs, it provides the proper
-  # vboxvideo driver and ensures the shell isn't stuck on the fallback
-  # framebuffer (which on VBox without 3D is what causes the black-screen
-  # symptom). ~10 MB on disk.
+  # VM guest integration (the common case for a test/lab server)
   virtualbox-guest-utils
 
-  # Python + build tools (needed for the CodeMaker venv to compile any
-  # native pip wheels for pyautogui / pytesseract / pillow on this host)
-  python python-pip base-devel cmake
+  # Removable storage — USB drives for backups/restores.
+  udisks2 gvfs xdg-user-dirs
 
-  # Outlaw CodeMaker runtime deps (X11 input + OCR backend for pyautogui /
-  # pytesseract). The Python packages themselves live in a venv created in
-  # /opt/outlaw-codemaker/.venv during this install (see post-pacstrap step).
-  xdotool scrot tesseract tesseract-data-eng
+  # Build tooling for on-demand server software (and the AUR helper).
+  python base-devel
 
-  # ollama: local LLM runtime for the on-device AI + the "AI runs your system"
-  # feature (Phase 13). Serves an OpenAI-compatible API on 127.0.0.1:11434; a
-  # tiny model gets pulled after first boot so AI works without manual setup.
+  # The small on-demand AI helper. Ollama loads the model only while it is
+  # answering and unloads it immediately after (keep_alive: 0), so an idle
+  # server pays nothing for it.
   ollama
-
-  # Desktop notifications. dunst is a tiny notification DAEMON (the freedesktop
-  # org.freedesktop.Notifications server) and libnotify provides `notify-send`.
-  # WITHOUT THESE the shell's AI `notify` action (and any notify-send) is a no-op
-  # — nothing appears on screen. dunst is autostarted (guarded) in .xinitrc.
-  dunst libnotify
-
-  # Removable media / USB drives. udisks2 is the storage daemon (D-Bus activated,
-  # no autostart needed), gvfs is the virtual-filesystem backend Thunar uses to
-  # mount/unmount, and thunar-volman auto-mounts drives when you plug them in.
-  # WITHOUT THESE, plugging in a USB stick does nothing and Thunar can't mount it.
-  udisks2 gvfs thunar-volman
-
-  # xdg-user-dirs: creates the standard ~/Downloads, ~/Documents, ~/Pictures …
-  # folders (run once on first login) so the Files app and apps have real
-  # user directories instead of a bare home. Lightweight, no daemon.
-  xdg-user-dirs
-
-  # Bluetooth. bluez is the stack + bluetooth.service daemon (enabled below),
-  # bluez-utils gives `bluetoothctl`, and blueman is the GTK manager the shell's
-  # "Pair a device…" button opens (blueman-manager). WITHOUT these there is no
-  # Bluetooth at all — the airplane toggle only rfkills a non-existent adapter.
-  bluez bluez-utils blueman
-
-  # Night light (Settings → Desktop). gammastep warms the screen's color
-  # temperature via the X gamma ramp (one-shot manual mode, no daemon). WITHOUT
-  # it the shell's night-light toggle reports "not installed" and stays a no-op.
-  gammastep
 )
 
-# OPTIONAL_BUNDLES — installed by /usr/share/outlaw-firstboot AFTER the user
-# logs in for the first time. The wizard shows each bundle as a checkbox
-# (defaulting to checked) and lets the user opt out of any of them. Bundle
-# definitions inside outlaw-firstboot/main.js must stay in sync with what's
-# listed here as a comment for the maintainer's reference:
+# OPTIONAL SERVER SOFTWARE — nothing extra is installed at install time. What a
+# box actually serves is chosen AFTER setup, from the panel, so every admin only
+# pays the disk/RAM cost of what they use, and each piece can be removed again:
 #
-#   steam-gaming: steam, gamemode, lib32-gamemode, gamescope, mangohud,
-#                 lib32-mangohud, vulkan-icd-loader, lib32-vulkan-icd-loader,
-#                 vulkan-tools, lib32-mesa
-#   firefox:      firefox
-#   godot:        godot
+#   docker      — container runtime (prerequisite for the two below)
+#   pterodactyl — game-server management panel + wings daemon  [Phase 5]
+#   portainer   — Docker management UI                          [Phase 5]
+#   cockpit     — classic Linux admin console                   [Phase 5]
+#   tailscale   — private-network remote access                 [Phase 3]
 #
-# Anything else (Blender, GIMP, VS Code, Lutris, Wine, etc.) stays available
-# on demand via the shell's Apps panel after first login.
+# Until those phases land, anything in the official repos is installable on
+# demand from the panel's Apps screen.
 
 PKGS=("${ESSENTIAL_PKGS[@]}")
 
@@ -699,14 +647,19 @@ ExecStart=-/usr/bin/agetty --autologin $USERNAME --noclear %I 38400 linux
 GETTY
 
 systemctl enable NetworkManager apparmor
-# Bluetooth stack — the bluetooth.service must be enabled for adapters to work +
-# for blueman/bluetoothctl to see them. Guarded so a missing unit can't abort.
-systemctl enable bluetooth 2>/dev/null || true
+# SSH — the always-there way back into a server when the panel is unreachable.
+# Enabled by default BECAUSE it is the recovery path; the account still needs a
+# real password (set during install) and the firewall screen can close port 22.
+systemctl enable sshd 2>/dev/null || true
+# Firewall on from the first boot. ufw's default policy denies incoming, so the
+# box isn't wide open the moment it gets an IP; the panel's firewall screen
+# opens what each service needs.
+systemctl enable ufw 2>/dev/null || true
 # Keep the clock correct automatically over the internet (NTP).
 systemctl enable systemd-timesyncd
-# Local AI runtime for the desktop's built-in AI (Phase 13.2). Light daemon — it
-# loads NO model until the desktop shell asks, so the Dev session (its own
-# backend) is unaffected. Guarded so a missing unit can't abort the install.
+# Local AI runtime for the on-demand helper. Light daemon — it loads NO model
+# until asked, and unloads immediately after answering (keep_alive: 0), so an
+# idle server pays nothing for it. Guarded so a missing unit can't abort.
 systemctl enable ollama 2>/dev/null || true
 
 # Cap the systemd stop timeout so a slow-to-exit graphical session can't hang

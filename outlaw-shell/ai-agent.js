@@ -179,6 +179,10 @@ async function ask(prompt, { model, appIds, machine, baseUrl, history, summary, 
         // Keep responses short — we only need a single JSON line. This also caps
         // VRAM cost on small machines.
         max_tokens: 256,
+        // ON-DEMAND (server): unload the model the moment this answer is done, so
+        // an idle server spends ZERO RAM/VRAM on the AI. The next message loads it
+        // again automatically. Ollama honours this; LM Studio ignores the field.
+        keep_alive: 0,
         messages,
     };
     const res = await timeoutFetch(`${baseUrl || LM_STUDIO_BASE}/chat/completions`, {
@@ -209,6 +213,8 @@ async function chat(messages, { model, maxTokens = 400, baseUrl } = {}) {
         stream: false,
         temperature: 0.4,
         max_tokens: maxTokens,
+        // ON-DEMAND (server) — see the note in ask(): unload right after answering.
+        keep_alive: 0,
         messages: Array.isArray(messages) ? messages : [],
     };
     const res = await timeoutFetch(`${baseUrl || LM_STUDIO_BASE}/chat/completions`, {
