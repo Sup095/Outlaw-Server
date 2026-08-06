@@ -49,12 +49,29 @@ guarded terminal.
 | | Phase | What you get |
 |:--:|:--|:--|
 | ✅ | **0 · Fork & strip** | The desktop OS cut down to a bootable, bare-bones server OS. |
-| 🚧 | **1 · Headless daemon** | `outlaw-serverd`: the control panel served over HTTP/WebSocket; Electron removed; **the UI itself becomes optional** (see below). |
-| 🔭 | **2 · Sign-in that means it** | Password + TOTP 2FA, session tokens, TLS, rate-limiting, audit log of every remote action. |
+| ✅ | **1 · Headless daemon** | `outlaw-serverd`: the control panel served over HTTP; **the UI itself is now optional** (see below). |
+| ✅ | **2 · Sign-in that means it** | Password (scrypt) + TOTP 2FA, revocable server-side sessions, per-IP lockout, audit log. TLS arrives with Phase 3, which is when it starts mattering. |
 | 🔭 | **3 · Remote access** | Tailscale/WireGuard integration — manage every box from anywhere, with nothing on the public internet. |
 | 🔭 | **4 · Server toolset** | Services manager, firewall, journal/log viewer, SSH keys, storage, live resource dashboard. |
 | 🔭 | **5 · Game servers** | One-click Pterodactyl (+ Docker), optional Portainer & Cockpit — all removable. |
 | 🔭 | **6 · Polish & first install** | Accessibility pass, docs, and the first real-hardware test. |
+
+### Signing in
+
+The first time you open the panel (or run `sudo outlaw passwd`) you create the
+administrator. That prints a **two-factor secret** to add to a free authenticator
+app — [Aegis](https://getaegis.app) (open source) is the recommendation; Google
+Authenticator and [Ente Auth](https://ente.io/auth) work too.
+
+**2FA is not enforced until you confirm it works** (`sudo outlaw 2fa <user> <code>`),
+so a mistyped secret can't lock you out of your own server. After that, sign-in needs
+the password *and* a live code. Five bad attempts locks that address out for 15
+minutes, and every sign-in and privileged action is written to an audit log
+(`outlaw audit`).
+
+Until Phase 3 adds an encrypted path, the panel **binds to loopback only and refuses
+to start on a network address** — the daemon speaks plain HTTP, and shipping your
+password across a LAN in the clear would be indefensible.
 
 ### Your server, your overhead
 

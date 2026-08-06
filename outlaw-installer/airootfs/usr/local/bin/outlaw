@@ -30,6 +30,10 @@ outlaw — Outlaw Server control
   outlaw disable <unit>      Disable a service at boot
   outlaw logs [unit] [n]     Recent journal lines (default 200)
   outlaw mode [panel|lean]   Show or set the control-panel mode
+  outlaw passwd [user]       Set the panel password (creates the admin, prints
+                             the 2FA secret to enrol in your authenticator app)
+  outlaw 2fa <user> <code>   Confirm 2FA — required before it is enforced
+  outlaw audit [n]           Recent sign-in / privileged-action records
   outlaw help                This text
 
 Modes:
@@ -102,6 +106,51 @@ case "${1:-help}" in
         else
             echo "Lean mode. Nothing is listening — manage this server over SSH or with 'outlaw'."
         fi
+        ;;
+    passwd)
+        user="${2:-admin}"
+        if [[ $EUID -ne 0 ]]; then echo "setting the panel password needs root: sudo outlaw passwd $user" >&2; exit 1; fi
+        # Read the password without echoing it, and never pass it as an argv
+        # element (argv is world-readable via /proc). It goes in on stdin.
+        read -rsp "New panel password for '$user' (min 10 chars): " pw1; echo
+        read -rsp "Repeat: " pw2; echo
+        if [[ "$pw1" != "$pw2" ]]; then echo "Passwords did not match." >&2; exit 1; fi
+        printf '%s' "$pw1" | node -e '
+            let pw = "";
+            process.stdin.on("data", (d) => { pw += d; });
+            process.stdin.on("end", () => {
+                const auth = require(process.argv[1] + "/auth");
+                const r = auth.setUser(process.argv[2], pw);
+                if (!r.ok) { console.error(r.error); process.exit(1); }
+                console.log("\nPassword set for " + r.user + ".");
+                if (r.totpSecret) {
+                    console.log("\n  Two-factor secret : " + r.totpSecret);
+                    console.log("  Or scan/paste     : " + r.totpUri);
+                    console.log("\n  Add that to a free authenticator app (Aegis, Google Authenticator,");
+                    console.log("  Ente Auth), then confirm it — 2FA is NOT enforced until you do,");
+                    console.log("  so a mistyped secret cannot lock you out:");
+                    console.log("\n      sudo outlaw 2fa " + r.user + " <6-digit code>\n");
+                }
+            });
+        ' "$SERVERD_DIR" "$user"
+        unset pw1 pw2
+        ;;
+    2fa)
+        user="${2:-}"; code="${3:-}"
+        if [[ -z "$user" || -z "$code" ]]; then echo "usage: outlaw 2fa <user> <6-digit code>" >&2; exit 2; fi
+        if [[ $EUID -ne 0 ]]; then echo "confirming 2FA needs root: sudo outlaw 2fa $user $code" >&2; exit 1; fi
+        node -e '
+            const auth = require(process.argv[1] + "/auth");
+            const r = auth.confirmTotp(process.argv[2], process.argv[3]);
+            if (!r.ok) { console.error(r.error); process.exit(1); }
+            console.log("Two-factor authentication confirmed and now REQUIRED at sign-in.");
+        ' "$SERVERD_DIR" "$user" "$code"
+        ;;
+    audit)
+        n="${2:-40}"
+        f="/var/lib/outlaw-server/audit.log"
+        if [[ ! -r "$f" ]]; then echo "No audit log yet (nothing has signed in)."; exit 0; fi
+        tail -n "$n" "$f"
         ;;
     help|-h|--help) usage ;;
     *) echo "unknown command: $1" >&2; echo; usage; exit 2 ;;

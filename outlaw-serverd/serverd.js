@@ -42,8 +42,9 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { dispatch } = require('./ops');
+const auth = require('./auth');
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const CONFIG_PATH = process.env.OUTLAW_SERVERD_CONFIG || '/etc/outlaw-server/daemon.json';
 const DEFAULT_UI_DIR = '/usr/share/outlaw-server/ui';
 
@@ -114,6 +115,44 @@ function serveStatic(cfg, urlPath, res) {
     });
 }
 
+// --- auth plumbing ----------------------------------------------------------
+
+// The client's address, for session binding and rate limiting. We do NOT honour
+// X-Forwarded-For: nothing is meant to sit in front of this daemon, and
+// trusting that header would let a caller forge its own identity and sidestep
+// the lockout entirely.
+function clientIp(req) {
+    return (req.socket && (req.socket.remoteAddress || '')) || 'unknown';
+}
+
+function parseCookies(req) {
+    const out = {};
+    const raw = req.headers.cookie || '';
+    for (const part of raw.split(';')) {
+        const i = part.indexOf('=');
+        if (i < 0) continue;
+        out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    }
+    return out;
+}
+
+function sessionCookie(token, maxAgeSec) {
+    // HttpOnly  — JavaScript can't read it, so an XSS can't exfiltrate it.
+    // SameSite=Strict — a hostile page can't ride the session cross-site.
+    // Path=/     — the whole control plane.
+    // (No Secure flag yet: this build is loopback-only plain HTTP. It gets set
+    //  when TLS lands with remote access, or the cookie would never be sent.)
+    return `outlaw_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}`;
+}
+
+function json(res, code, obj, extraHeaders = {}) {
+    res.writeHead(code, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        ...extraHeaders,
+    }).end(JSON.stringify(obj));
+}
+
 function readBody(req, limitBytes = 256 * 1024) {
     return new Promise((resolve, reject) => {
         let size = 0;
@@ -141,28 +180,113 @@ function start() {
         return;
     }
 
-    // Phase-1 safety gate: no auth exists yet, so refuse anything but loopback.
+    // Sign-in exists as of Phase 2, but the transport is still plain HTTP —
+    // so binding to a network address would put the password on the wire in
+    // clear text. Loopback stays mandatory until Phase 3 provides an encrypted
+    // path (Tailscale/WireGuard, which encrypts end-to-end, or TLS).
     if (cfg.host !== '127.0.0.1' && cfg.host !== '::1' && cfg.host !== 'localhost') {
-        console.error(`[outlaw-serverd] REFUSING to bind ${cfg.host}: this build has no authentication yet,`);
-        console.error('[outlaw-serverd] so it must stay on loopback. Remote access arrives in phases 2-3.');
+        console.error(`[outlaw-serverd] REFUSING to bind ${cfg.host}: the panel still speaks plain HTTP,`);
+        console.error('[outlaw-serverd] so off-loopback would send credentials in the clear.');
+        console.error('[outlaw-serverd] Encrypted remote access arrives in Phase 3 (Tailscale/WireGuard).');
         process.exit(1);
     }
 
     const server = http.createServer(async (req, res) => {
         const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+        const ip = clientIp(req);
+
+        // ---- authentication endpoints (the only unauthenticated surface) ----
+
+        if (url.pathname === '/auth/status' && req.method === 'GET') {
+            const token = parseCookies(req).outlaw_session;
+            const sess = auth.verifySession(token, ip);
+            json(res, 200, {
+                configured: auth.isConfigured(),
+                authenticated: !!sess,
+                user: sess ? sess.user : null,
+            });
+            return;
+        }
+
+        if (url.pathname === '/auth/login' && req.method === 'POST') {
+            let body;
+            try { body = JSON.parse(await readBody(req, 8 * 1024) || '{}'); }
+            catch { json(res, 400, { ok: false, error: 'Bad request.' }); return; }
+            const r = auth.login({ user: body.user, password: body.password, code: body.code, ip });
+            if (!r.ok) { json(res, 401, r); return; }
+            json(res, 200, { ok: true, user: r.user },
+                 { 'Set-Cookie': sessionCookie(r.token, Math.floor(r.expiresInMs / 1000)) });
+            return;
+        }
+
+        if (url.pathname === '/auth/logout' && req.method === 'POST') {
+            auth.logout(parseCookies(req).outlaw_session);
+            json(res, 200, { ok: true },
+                 { 'Set-Cookie': 'outlaw_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+            return;
+        }
+
+        // First-run enrolment. Allowed ONLY while no user exists — once the
+        // machine has an admin this endpoint is permanently closed, so it can
+        // never be used to add a second one.
+        if (url.pathname === '/auth/setup' && req.method === 'POST') {
+            if (auth.isConfigured()) {
+                auth.audit('auth.setup_refused', { ip, reason: 'already_configured' });
+                json(res, 409, { ok: false, error: 'This server already has an administrator.' });
+                return;
+            }
+            let body;
+            try { body = JSON.parse(await readBody(req, 8 * 1024) || '{}'); }
+            catch { json(res, 400, { ok: false, error: 'Bad request.' }); return; }
+            const r = auth.setUser(body.user, body.password);
+            json(res, r.ok ? 200 : 400, r);
+            return;
+        }
+
+        // Confirm the authenticator app before 2FA starts being enforced.
+        if (url.pathname === '/auth/confirm-totp' && req.method === 'POST') {
+            let body;
+            try { body = JSON.parse(await readBody(req, 8 * 1024) || '{}'); }
+            catch { json(res, 400, { ok: false, error: 'Bad request.' }); return; }
+            json(res, 200, auth.confirmTotp(body.user, body.code));
+            return;
+        }
+
+        // ---- everything below requires a session ----------------------------
+
+        const token = parseCookies(req).outlaw_session;
+        const session = auth.verifySession(token, ip);
+        const needsAuth = url.pathname === '/rpc' || url.pathname === '/events';
+
+        if (needsAuth && !session) {
+            // A machine with no admin yet must be set up before it will do
+            // anything — say which case this is so the UI can route correctly.
+            json(res, 401, {
+                ok: false,
+                error: auth.isConfigured() ? 'Not signed in.' : 'This server has no administrator yet.',
+                needSetup: !auth.isConfigured(),
+                needLogin: auth.isConfigured(),
+            });
+            return;
+        }
+
         if (url.pathname === '/rpc' && req.method === 'POST') {
             let payload;
             try {
                 payload = JSON.parse(await readBody(req) || '{}');
             } catch (e) {
-                res.writeHead(400, { 'Content-Type': 'application/json' })
-                   .end(JSON.stringify({ ok: false, error: 'Bad request: ' + e.message }));
+                json(res, 400, { ok: false, error: 'Bad request: ' + e.message });
                 return;
             }
-            const result = await dispatch(String(payload.op || ''), payload.args, ctx);
-            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-               .end(JSON.stringify(result));
+            const op = String(payload.op || '');
+            const result = await dispatch(op, payload.args, { ...ctx, user: session.user });
+            // Record what was actually done, by whom — reads are noise, so only
+            // state-changing operations are audited.
+            if (/^(services:action|proc:kill|power:)/.test(op)) {
+                auth.audit('op', { user: session.user, ip, op, args: payload.args || {}, ok: result.ok !== false });
+            }
+            json(res, 200, result);
             return;
         }
 
@@ -189,7 +313,10 @@ function start() {
 
     server.listen(cfg.port, cfg.host, () => {
         console.log(`[outlaw-serverd] v${VERSION} — panel on http://${cfg.host}:${cfg.port}`);
-        console.log('[outlaw-serverd] loopback only (no auth yet). Idle cost: no timers, no polling.');
+        console.log(auth.isConfigured()
+            ? '[outlaw-serverd] sign-in required. Loopback only until Phase 3 adds encrypted remote access.'
+            : '[outlaw-serverd] NO ADMINISTRATOR YET — open the panel (or run `outlaw passwd`) to create one.');
+        console.log('[outlaw-serverd] idle cost: no timers, no polling.');
     });
 
     // Shut down cleanly so `systemctl restart` is instant rather than waiting
