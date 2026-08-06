@@ -1,6 +1,6 @@
 {
   "name": "outlaw-server",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Outlaw Server - a stripped-down, security-first Linux server OS managed from a web browser, with one-click game-server (Pterodactyl) setup",
   "main": "main.js",
   "author": "Outlaw Server",
@@ -22,6 +22,7 @@
       "preload.js",
       "ai-agent.js",
       "renderer.js",
+      "web-bridge.js",
       "diagnostics.js",
       "diagnostics-cli.js",
       "updater.js",

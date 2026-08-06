@@ -1126,6 +1126,10 @@
     </div>
 </div>
 
+<!-- web-bridge.js installs window.outlaw over HTTP when this page is opened in
+     a plain browser (the control panel). Inside Electron it detects preload's
+     IPC bridge and does nothing. MUST load before renderer.js, which uses it. -->
+<script src="web-bridge.js"></script>
 <script src="help-data.js"></script>
 <script src="renderer.js"></script>
 </body>

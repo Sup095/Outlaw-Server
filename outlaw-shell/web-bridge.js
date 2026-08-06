@@ -19,6 +19,12 @@
 (function () {
     'use strict';
 
+    // The SAME index.html is loaded by both frontends, so this file ships in
+    // both. Inside Electron, preload.js has already installed the real (IPC)
+    // bridge — bail out rather than clobbering it with the HTTP one. Only a
+    // plain browser, which has no preload, gets the transport below.
+    if (window.outlaw) return;
+
     const RPC = '/rpc';
 
     async function invoke(op, args) {

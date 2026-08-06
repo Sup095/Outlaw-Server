@@ -20,7 +20,7 @@ RELENG="/usr/share/archiso/configs/releng"
 # Default version baked in for local builds. CI overrides this from the git
 # tag via OUTLAW_ISO_VERSION (see .github/workflows/build-iso.yml) so the
 # artifact filename always matches the tag the user pushed.
-ISO_VERSION="${OUTLAW_ISO_VERSION:-0.3.0}"
+ISO_VERSION="${OUTLAW_ISO_VERSION:-0.3.1}"
 ISO_FINAL="$OUT_DIR/outlaw-server-v${ISO_VERSION}.iso"
 
 echo "========================================"
@@ -123,9 +123,9 @@ if [[ -d "$REPO_ROOT/outlaw-serverd" ]]; then
     install -d "$PROFILE_DIR/airootfs/usr/share/outlaw-server/ui"
     cp -rT "$REPO_ROOT/outlaw-shell" "$PROFILE_DIR/airootfs/usr/share/outlaw-server/ui"
     rm -rf "$PROFILE_DIR/airootfs/usr/share/outlaw-server/ui/node_modules" 2>/dev/null || true
-    # In a browser there is no preload bridge, so the UI loads web-bridge.js
-    # instead. Same window.outlaw shape, HTTP transport.
-    cp "$REPO_ROOT/outlaw-serverd/web-bridge.js" "$PROFILE_DIR/airootfs/usr/share/outlaw-server/ui/web-bridge.js"
+    # web-bridge.js lives in outlaw-shell/ (it IS a UI file), so the copy above
+    # already placed it here — and in the Electron tree too, where it detects
+    # preload's IPC bridge and stays out of the way.
 else
     echo "  ⚠ outlaw-serverd/ not found — building without the control daemon."
 fi
