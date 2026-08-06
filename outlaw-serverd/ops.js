@@ -142,11 +142,21 @@ const ops = {
 
     // --- services (the daily bread of server admin) -------------------------
 
+    // NOTE the `available` flag. "We couldn't read the service list" and "this
+    // machine has no services" are wildly different facts, and an empty array
+    // renders identically for both — a reassuring blank screen over a failure.
+    // Callers must be able to tell them apart.
     'services:list': async () => {
-        if (!IS_LINUX) return { units: [] };
+        if (!IS_LINUX) return { ok: true, available: false, units: [], error: 'Runs on Outlaw Server.' };
         const r = await run('systemctl', [
             'list-units', '--type=service', '--all', '--no-legend', '--no-pager', '--plain',
         ], { timeout: 12000 });
+        if (!r.ok) {
+            return {
+                ok: true, available: false, units: [],
+                error: (r.stderr || r.stdout || 'systemctl did not answer').trim().slice(-200),
+            };
+        }
         const units = r.stdout.split('\n').map((l) => {
             const p = l.trim().split(/\s+/);
             if (p.length < 4) return null;
@@ -155,7 +165,7 @@ const ops = {
                 description: p.slice(4).join(' '),
             };
         }).filter(Boolean);
-        return { units };
+        return { ok: true, available: true, units };
     },
 
     'services:status': async (_ctx, { unit } = {}) => {
@@ -191,7 +201,7 @@ const ops = {
     // --- logs ---------------------------------------------------------------
 
     'logs:recent': async (_ctx, { unit, lines } = {}) => {
-        if (!IS_LINUX) return { lines: [] };
+        if (!IS_LINUX) return { ok: true, available: false, lines: [], error: 'Runs on Outlaw Server.' };
         const n = Math.max(10, Math.min(1000, parseInt(lines, 10) || 200));
         const args = ['--no-pager', '-n', String(n), '-o', 'short-iso'];
         if (unit) {
@@ -199,7 +209,15 @@ const ops = {
             args.push('-u', unit);
         }
         const r = await run('journalctl', args, { timeout: 15000 });
-        return { ok: true, lines: r.stdout.split('\n').filter(Boolean) };
+        // Same reasoning as services:list — an unreadable journal must not be
+        // presented as a quiet one.
+        if (!r.ok) {
+            return {
+                ok: true, available: false, lines: [],
+                error: (r.stderr || r.stdout || 'journalctl did not answer').trim().slice(-200),
+            };
+        }
+        return { ok: true, available: true, lines: r.stdout.split('\n').filter(Boolean) };
     },
 
     // --- process control ----------------------------------------------------
@@ -223,6 +241,85 @@ const ops = {
         if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
         const r = await run('systemctl', ['poweroff'], { timeout: 10000 });
         return r.ok ? { ok: true } : { ok: false, error: (r.stderr || 'shutdown failed').slice(-200) };
+    },
+
+    // --- firewall (ufw) -----------------------------------------------------
+    // A game server means opening ports, and opening ports is the single
+    // easiest way to turn a private box into a public one by accident. So the
+    // rules here are deliberately narrow: numeric ports and tcp/udp only.
+    // No "allow from any to any", no service-name lookups, no raw rule strings
+    // — anything richer is a job for the terminal, where the person doing it
+    // can see exactly what they typed.
+
+    'firewall:status': async () => {
+        if (!IS_LINUX) return { ok: true, available: false, active: false, rules: [] };
+        const v = await run('ufw', ['status', 'numbered'], { timeout: 10000 });
+        if (!v.ok) {
+            // Not installed, or we're not root. Both are worth saying out loud
+            // rather than rendering an empty (and reassuring) rule list.
+            const msg = (v.stderr || v.stdout || '').trim();
+            return {
+                ok: true, available: false, active: false, rules: [],
+                error: /command not found|ENOENT/i.test(msg) ? 'ufw is not installed.'
+                    : /root|permission/i.test(msg) ? 'Reading the firewall needs root.'
+                        : msg.slice(-200) || 'Could not read the firewall.',
+            };
+        }
+        const out = v.stdout;
+        const active = /Status:\s*active/i.test(out);
+        const rules = [];
+        for (const line of out.split('\n')) {
+            // "[ 1] 25565/tcp                  ALLOW IN    Anywhere"
+            const m = line.match(/^\s*\[\s*(\d+)\]\s+(.+?)\s{2,}(ALLOW|DENY|REJECT|LIMIT)\s+(IN|OUT)\s*(.*)$/i);
+            if (m) rules.push({ num: Number(m[1]), target: m[2].trim(), action: m[3].toUpperCase(), dir: m[4].toUpperCase(), from: (m[5] || '').trim() });
+        }
+        return { ok: true, available: true, active, rules };
+    },
+
+    'firewall:set': async (_ctx, { enabled } = {}) => {
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
+        // --force on enable, because ufw otherwise asks an interactive
+        // "this may disrupt existing ssh connections" question that nothing is
+        // there to answer, and the command would hang until it timed out.
+        const args = enabled === false ? ['disable'] : ['--force', 'enable'];
+        const r = await run('ufw', args, { timeout: 20000 });
+        if (!r.ok) return { ok: false, error: (r.stderr || r.stdout || 'ufw failed').trim().slice(-250) };
+        return { ok: true, active: enabled !== false };
+    },
+
+    'firewall:allow': async (_ctx, { port, proto, action } = {}) => {
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
+        // Whole string or nothing. parseInt() would happily read "2500-2600" as
+        // 2500 and "80abc" as 80 — opening a port the person did not ask for
+        // while reporting success. On a firewall, quietly acting on a different
+        // value than the one typed is the worst possible failure.
+        const raw = String(port == null ? '' : port).trim();
+        if (!/^\d{1,5}$/.test(raw)) {
+            return { ok: false, error: 'Port must be a single whole number from 1 to 65535 (ranges and lists are not supported here — use the terminal).' };
+        }
+        const p = Number(raw);
+        if (p < 1 || p > 65535) return { ok: false, error: 'Port must be a number from 1 to 65535.' };
+        const pr = String(proto || 'tcp').toLowerCase();
+        if (pr !== 'tcp' && pr !== 'udp') return { ok: false, error: 'Protocol must be tcp or udp.' };
+        const act = action === 'deny' ? 'deny' : 'allow';
+        const r = await run('ufw', [act, `${p}/${pr}`], { timeout: 15000 });
+        if (!r.ok) return { ok: false, error: (r.stderr || r.stdout || 'ufw failed').trim().slice(-250) };
+        return { ok: true, rule: `${act} ${p}/${pr}` };
+    },
+
+    'firewall:delete': async (_ctx, { num } = {}) => {
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
+        // Same strictness as the port: deleting rule 1 when "1x" was meant is
+        // an unnoticed hole in the firewall.
+        const raw = String(num == null ? '' : num).trim();
+        if (!/^\d{1,4}$/.test(raw)) return { ok: false, error: 'Invalid rule number.' };
+        const n = Number(raw);
+        if (n < 1) return { ok: false, error: 'Invalid rule number.' };
+        // Rule numbers shift after every delete, so the caller must be looking
+        // at a current list. --force skips the interactive confirmation.
+        const r = await run('ufw', ['--force', 'delete', String(n)], { timeout: 15000 });
+        if (!r.ok) return { ok: false, error: (r.stderr || r.stdout || 'ufw failed').trim().slice(-250) };
+        return { ok: true, deleted: n };
     },
 
     // --- remote access ------------------------------------------------------
@@ -321,8 +418,8 @@ const ops = {
             bindKind: remote.classifyBind(cfg.host).kind,
             serve: cfg.trustProxy === true,
             // Honest statement of what this build can do yet.
-            phase: 3,
-            note: 'Phase 3: local control, sign-in, and remote access over an encrypted tunnel. Server toolset and one-click game servers land in phases 4-5.',
+            phase: 4,
+            note: 'Phase 4: sign-in, remote access over an encrypted tunnel, and the core server tools (services, journal, firewall). SSH keys, a storage screen and one-click game servers are still to come.',
         };
     },
 };

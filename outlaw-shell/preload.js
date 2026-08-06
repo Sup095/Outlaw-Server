@@ -20,6 +20,13 @@ const EVENT_CHANNELS = ['toast',
 ];
 
 contextBridge.exposeInMainWorld('outlaw', {
+    // --- The server operations registry -------------------------------------
+    // Server features live in one place (outlaw-serverd/ops.js) and are reached
+    // by name. The browser build calls the identical `invoke(op, args)` over
+    // POST /rpc, so a screen written against this works in both frontends with
+    // no branching — that is the whole point of the shared UI.
+    invoke: (op, args) => ipcRenderer.invoke('ops:dispatch', op, args),
+
     // --- System information -------------------------------------------------
     system: {
         info: () => ipcRenderer.invoke('system:info'),

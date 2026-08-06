@@ -78,6 +78,10 @@
     <nav class="sidebar" id="nav">
         <button class="nav-item active" data-screen="dashboard"><span class="ico">▣</span> Dashboard</button>
         <button class="nav-item" data-screen="files"><span class="ico">📁</span> Files</button>
+        <button class="nav-item" data-screen="services"><span class="ico">⚙</span> Services</button>
+        <button class="nav-item" data-screen="logs"><span class="ico">📜</span> System Log</button>
+        <button class="nav-item" data-screen="firewall"><span class="ico">🛡</span> Firewall</button>
+        <button class="nav-item" data-screen="remote"><span class="ico">🔗</span> Remote Access</button>
         <button class="nav-item" data-screen="tasks"><span class="ico">📊</span> Task Manager</button>
         <button class="nav-item" data-screen="terminal"><span class="ico">&gt;_</span> Terminal</button>
         <button class="nav-item" data-screen="apps"><span class="ico">📦</span> Apps</button>
@@ -177,6 +181,118 @@
                     </tr></thead>
                     <tbody id="proc-body"></tbody></table>
                 </div>
+            </div>
+        </section>
+
+        <!-- Services -->
+        <section class="screen" id="screen-services">
+            <div class="row"><h2>Services</h2><span class="spacer"></span>
+                <input id="svc-filter" placeholder="Filter services…" autocomplete="off" style="width:auto;flex:0 1 220px;min-width:160px;">
+                <button data-action="svc-refresh">↻ Refresh</button>
+            </div>
+            <details class="page-help">
+                <summary>What is this?</summary>
+                <p>Everything this machine runs in the background — your game server, SSH, the firewall, the control panel itself. <b>Running</b> means it is up right now; <b>enabled</b> means it comes back on its own after a reboot. Those are separate on purpose: you can stop something temporarily without it returning at boot, or set it to start at boot without starting it this second. <b>Restart</b> is the usual fix after changing a config file.</p>
+            </details>
+            <div class="card" style="padding-top:8px;">
+                <div class="proc-wrap">
+                    <table class="proc"><thead><tr>
+                        <th scope="col">Service</th>
+                        <th scope="col">State</th>
+                        <th scope="col">At boot</th>
+                        <th scope="col">Description</th>
+                        <th scope="col" class="right">Actions</th>
+                    </tr></thead>
+                    <tbody id="svc-body"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
+                </div>
+            </div>
+            <div id="svc-msg" class="muted mono" style="margin-top:8px;"></div>
+        </section>
+
+        <!-- Logs -->
+        <section class="screen" id="screen-logs">
+            <div class="row"><h2>System Log</h2><span class="spacer"></span>
+                <input id="log-unit" placeholder="Service (blank = everything)" autocomplete="off" style="width:auto;flex:0 1 240px;min-width:170px;">
+                <select id="log-lines" aria-label="How many lines" style="width:auto;">
+                    <option value="200">200 lines</option>
+                    <option value="500">500 lines</option>
+                    <option value="1000">1000 lines</option>
+                </select>
+                <button data-action="log-refresh">↻ Load</button>
+            </div>
+            <details class="page-help">
+                <summary>What is this?</summary>
+                <p>The system journal — what the machine has been saying about itself. When something breaks, the reason is almost always here. Type a service name (like <span class="mono">sshd</span> or <span class="mono">outlaw-serverd</span>) to see only its messages, or leave it blank for everything. Newest lines are at the bottom.</p>
+            </details>
+            <div class="card" style="padding-top:8px;">
+                <pre id="log-out" class="mono" style="margin:0;white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;font-size:11px;line-height:1.5;">Press Load to read the journal.</pre>
+            </div>
+        </section>
+
+        <!-- Firewall -->
+        <section class="screen" id="screen-firewall">
+            <div class="row"><h2>Firewall</h2><span class="spacer"></span>
+                <span id="fw-state" class="badge">checking…</span>
+                <button data-action="fw-refresh">↻ Refresh</button>
+            </div>
+            <details class="page-help">
+                <summary>What is this?</summary>
+                <p>Controls which ports the outside world can reach. The firewall <b>denies incoming connections by default</b>, so a service is unreachable until you open its port here — that is what keeps a fresh install from being wide open the moment it gets an address. Open only what you actually need: a Minecraft server wants <span class="mono">25565/tcp</span>, and nothing else needs to be open for it to work.</p>
+                <p><b>Careful with SSH.</b> If you are connected over SSH and you turn the firewall on without <span class="mono">22/tcp</span> allowed, you will lose the connection and need physical access to get back in.</p>
+            </details>
+            <div class="card">
+                <div class="setting">
+                    <div class="label">Firewall<small id="fw-sub">Denies incoming connections that aren't explicitly allowed.</small></div>
+                    <label class="switch"><input type="checkbox" id="fw-toggle"><span class="track"></span></label>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Open a port</h3>
+                <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+                    <input id="fw-port" placeholder="Port (e.g. 25565)" inputmode="numeric" autocomplete="off" style="width:auto;flex:0 1 170px;">
+                    <select id="fw-proto" aria-label="Protocol" style="width:auto;">
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                    </select>
+                    <button id="fw-allow" class="primary" type="button">Allow</button>
+                    <button id="fw-deny" type="button">Deny</button>
+                </div>
+                <div id="fw-msg" class="muted mono" style="margin-top:8px;"></div>
+            </div>
+            <div class="card" style="padding-top:8px;">
+                <h3>Rules</h3>
+                <div class="proc-wrap">
+                    <table class="proc"><thead><tr>
+                        <th scope="col">#</th>
+                        <th scope="col">Port / service</th>
+                        <th scope="col">Action</th>
+                        <th scope="col">From</th>
+                        <th scope="col" class="right"></th>
+                    </tr></thead>
+                    <tbody id="fw-body"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Remote access -->
+        <section class="screen" id="screen-remote">
+            <div class="row"><h2>Remote Access</h2><span class="spacer"></span>
+                <button data-action="remote-refresh">↻ Refresh</button>
+            </div>
+            <details class="page-help">
+                <summary>What is this?</summary>
+                <p>How you reach this panel from somewhere that isn't this machine. It rides a <b>private encrypted network</b> (Tailscale), so the control panel is never exposed to the open internet — there is no public address to find and nothing to port-forward.</p>
+                <p>The panel will only listen on <b>loopback</b> (this machine alone) or on a <b>tunnel address</b>. A LAN or public address is refused outright, because the panel speaks plain HTTP and your password would cross the wire in the clear.</p>
+            </details>
+            <div class="card">
+                <div id="remote-summary" class="mono" style="line-height:1.8;">Loading…</div>
+            </div>
+            <div class="card">
+                <h3>Set it up</h3>
+                <p class="muted" style="margin:0 0 10px;">Joining a tailnet needs a one-time sign-in from any browser. Run this at the machine (or over SSH):</p>
+                <pre class="mono" style="margin:0 0 10px;padding:10px;background:var(--bg2,#0a0a0a);border:1px solid var(--line);overflow:auto;">sudo outlaw remote up
+sudo outlaw remote bind tunnel</pre>
+                <div id="remote-auth" class="muted mono" style="word-break:break-all;"></div>
             </div>
         </section>
 

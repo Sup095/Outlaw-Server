@@ -86,7 +86,9 @@
             kill: (pid) => invoke('proc:kill', { pid }),
         },
         services: {
-            list: () => invoke('services:list').then((r) => (r && r.units) || []),
+            // Returns the whole result, not just the array: callers need the
+            // `available` flag to tell "couldn't read it" from "none exist".
+            list: () => invoke('services:list'),
             status: (unit) => invoke('services:status', { unit }),
             start: (unit) => invoke('services:action', { unit, action: 'start' }),
             stop: (unit) => invoke('services:action', { unit, action: 'stop' }),

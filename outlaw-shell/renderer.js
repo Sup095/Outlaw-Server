@@ -590,12 +590,239 @@ function showScreen(name) {
     if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
     if (name === 'ai') $('#ai-in').focus();
     if (name === 'terminal') $('#term-in').focus();
+    // Server screens load on arrival and on demand — never on a timer.
+    if (name === 'services') refreshServices();
+    if (name === 'firewall') refreshFirewall();
+    if (name === 'remote') refreshRemote();
     // System Core lifecycle — init when navigating to it, teardown otherwise.
     // The module is self-contained so this is the only hook the rest of the
     // shell needs to know about. SC2+ slices plug into the same init/teardown.
     if (window.outlawCore) {
         if (name === 'syscore') window.outlawCore.init();
         else window.outlawCore.teardown();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Server screens — services, journal, firewall, remote access
+// ---------------------------------------------------------------------------
+// Every one of these reaches the shared operations registry BY NAME through
+// api.invoke(). That single call is Electron IPC in the local panel and
+// POST /rpc in the browser, so these screens behave identically in both and
+// there is no second implementation to keep in step.
+//
+// Nothing here polls. A screen loads when you open it and when you ask it to
+// refresh — an idle panel costs the server nothing, which is the same rule the
+// daemon holds itself to.
+
+async function op(name, args) {
+    try {
+        const r = await api.invoke(name, args || {});
+        return r || { ok: false, error: 'No response.' };
+    } catch (e) {
+        return { ok: false, error: (e && e.message) || String(e) };
+    }
+}
+
+// --- Services ---------------------------------------------------------------
+let _svcCache = [];
+
+function renderServices() {
+    const body = $('#svc-body');
+    if (!body) return;
+    const filter = (($('#svc-filter') || {}).value || '').trim().toLowerCase();
+    const rows = _svcCache.filter((u) => !filter || u.unit.toLowerCase().includes(filter)
+        || (u.description || '').toLowerCase().includes(filter));
+    if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="5" class="muted">${filter ? 'Nothing matches that filter.' : 'No services reported.'}</td></tr>`;
+        return;
+    }
+    body.innerHTML = rows.map((u) => {
+        const running = u.active === 'active';
+        const name = _escapeHtml(u.unit);
+        return `<tr>
+            <td class="mono">${name}</td>
+            <td><span class="badge${running ? ' on' : ''}">${_escapeHtml(u.sub || u.active || '?')}</span></td>
+            <td class="mono dim" data-svc-boot="${name}">—</td>
+            <td class="dim">${_escapeHtml((u.description || '').slice(0, 70))}</td>
+            <td class="right" style="white-space:nowrap;">
+                <button data-svc="${name}" data-svc-action="restart" title="Stop and start it again — the usual fix after a config change">↻</button>
+                ${running
+        ? `<button data-svc="${name}" data-svc-action="stop" title="Stop it now">■</button>`
+        : `<button data-svc="${name}" data-svc-action="start" title="Start it now">▶</button>`}
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+async function refreshServices() {
+    const body = $('#svc-body');
+    if (body) body.innerHTML = '<tr><td colspan="5" class="muted">Loading…</td></tr>';
+    const r = await op('services:list');
+    // "Couldn't read them" must never render as "there aren't any" — an empty
+    // table over a failure reads as a healthy machine with nothing running.
+    if (r.ok === false || r.available === false) {
+        if (body) body.innerHTML = `<tr><td colspan="5" class="muted">Couldn't read the service list: ${_escapeHtml(r.error || 'unknown error')}</td></tr>`;
+        _svcCache = [];
+        return;
+    }
+    _svcCache = (r.units || []).filter((u) => u && u.unit);
+    renderServices();
+}
+
+async function serviceAction(unit, action) {
+    const msg = $('#svc-msg');
+    if (msg) msg.textContent = `${action}ing ${unit}…`;
+    const r = await op('services:action', { unit, action });
+    if (msg) {
+        msg.textContent = r.ok === false
+            ? `Couldn't ${action} ${unit}: ${r.error || 'unknown error'}`
+            : `${unit} ${action === 'stop' ? 'stopped' : action === 'start' ? 'started' : 'restarted'}.`;
+    }
+    if (r.ok !== false) toast(`${unit} ${action}ed.`);
+    else toast(`Couldn't ${action} ${unit}.`);
+    refreshServices();
+}
+
+// --- System log -------------------------------------------------------------
+async function refreshLogs() {
+    const out = $('#log-out');
+    if (!out) return;
+    out.textContent = 'Reading the journal…';
+    const unit = (($('#log-unit') || {}).value || '').trim();
+    const lines = parseInt((($('#log-lines') || {}).value || '200'), 10) || 200;
+    const r = await op('logs:recent', unit ? { unit, lines } : { lines });
+    if (r.ok === false || r.available === false) {
+        out.textContent = "Couldn't read the journal: " + (r.error || 'unknown error');
+        return;
+    }
+    const list = r.lines || [];
+    out.textContent = list.length
+        ? list.join('\n')
+        : (unit ? `The journal has nothing for "${unit}". Check the service name.` : 'The journal came back empty.');
+    // Newest entries are last — start the reader where the action is.
+    out.scrollTop = out.scrollHeight;
+}
+
+// --- Firewall ---------------------------------------------------------------
+let _fwRules = [];
+function _fwMsg(t) { const el = $('#fw-msg'); if (el) el.textContent = t || ''; }
+
+async function refreshFirewall() {
+    const body = $('#fw-body');
+    const state = $('#fw-state');
+    const tog = $('#fw-toggle');
+    const sub = $('#fw-sub');
+    const r = await op('firewall:status');
+
+    if (r.available === false) {
+        if (state) { state.textContent = 'unavailable'; state.className = 'badge'; }
+        if (tog) tog.disabled = true;
+        if (sub) sub.textContent = r.error || 'The firewall could not be read on this machine.';
+        if (body) body.innerHTML = `<tr><td colspan="5" class="muted">${_escapeHtml(r.error || 'Firewall unavailable.')}</td></tr>`;
+        return;
+    }
+    if (tog) { tog.disabled = false; tog.checked = !!r.active; }
+    if (state) { state.textContent = r.active ? 'active' : 'inactive'; state.className = 'badge' + (r.active ? ' on' : ''); }
+    if (sub) {
+        sub.textContent = r.active
+            ? 'On — incoming connections are denied unless a rule below allows them.'
+            : 'Off — nothing is being filtered. Every listening port is reachable.';
+    }
+    _fwRules = r.rules || [];
+    if (!body) return;
+    const rules = _fwRules;
+    if (!rules.length) {
+        body.innerHTML = `<tr><td colspan="5" class="muted">No rules${r.active ? ' — everything incoming is denied.' : '.'}</td></tr>`;
+        return;
+    }
+    body.innerHTML = rules.map((x) => `<tr>
+        <td class="mono dim">${x.num}</td>
+        <td class="mono">${_escapeHtml(x.target)}</td>
+        <td><span class="badge${x.action === 'ALLOW' ? ' on' : ''}">${_escapeHtml(x.action)}</span></td>
+        <td class="dim">${_escapeHtml(x.from || 'Anywhere')}</td>
+        <td class="right"><button class="danger" data-fw-del="${x.num}" title="Delete this rule">✕</button></td>
+    </tr>`).join('');
+}
+
+async function firewallAdd(action) {
+    const portEl = $('#fw-port');
+    const port = ((portEl || {}).value || '').trim();
+    const proto = (($('#fw-proto') || {}).value || 'tcp');
+    if (!port) { _fwMsg('Enter a port number first.'); return; }
+    _fwMsg(`${action === 'deny' ? 'Denying' : 'Allowing'} ${port}/${proto}…`);
+    const r = await op('firewall:allow', { port, proto, action });
+    if (r.ok === false) { _fwMsg(r.error || 'That rule was refused.'); return; }
+    _fwMsg(`Rule added: ${r.rule}.`);
+    if (portEl) portEl.value = '';
+    refreshFirewall();
+}
+
+async function firewallDelete(num) {
+    const rule = (_fwRules || []).find((x) => String(x.num) === String(num));
+    const target = rule ? rule.target : '';
+    // Deleting the rule that keeps SSH open, while connected over SSH, ends the
+    // session and needs physical access to undo. Say so in the dialog rather
+    // than letting someone find out afterwards.
+    const locksYouOut = /(^|\D)22(\D|$)|ssh/i.test(target);
+    const okToGo = await askConfirm({
+        title: `Delete firewall rule ${num}?`,
+        reason: locksYouOut
+            ? 'This rule appears to be what keeps SSH reachable. If you are connected over SSH right now, deleting it ends this connection and you will need physical access to the machine to get back in.'
+            : 'Whatever uses this port becomes unreachable from outside. Rule numbers also shift after a delete, so check the list again before deleting another.',
+        cmd: `ufw delete ${num}${target ? '    (' + target + ')' : ''}`,
+    });
+    if (!okToGo) return;
+    // Rule numbers shift the moment one is removed, so re-read rather than
+    // trusting what is still on screen.
+    const r = await op('firewall:delete', { num });
+    _fwMsg(r.ok === false ? (r.error || 'Could not delete that rule.') : `Rule ${num} deleted.`);
+    if (r.ok !== false) toast(`Firewall rule ${num} deleted.`);
+    refreshFirewall();
+}
+
+// --- Remote access ----------------------------------------------------------
+async function refreshRemote() {
+    const box = $('#remote-summary');
+    const authBox = $('#remote-auth');
+    if (!box) return;
+    box.textContent = 'Loading…';
+    if (authBox) authBox.textContent = '';
+    const r = await op('remote:status');
+    if (r.ok === false) { box.textContent = "Couldn't read remote-access status: " + (r.error || 'unknown'); return; }
+
+    const ts = r.tailscale || {};
+    const bind = r.bind || {};
+    const line = (label, value, cls) =>
+        `<div><span class="dim" style="display:inline-block;min-width:150px;">${label}</span>`
+        + `<span class="${cls || ''}">${_escapeHtml(String(value))}</span></div>`;
+
+    const state = !ts.installed ? 'not installed'
+        : ts.connected ? 'connected'
+            : ts.running ? (ts.state || 'running, not signed in')
+                : 'stopped';
+
+    let html = line('Tailscale', state, ts.connected ? 'badge on' : 'badge');
+    if (ts.ipv4) html += line('This machine', ts.ipv4 + (ts.dnsName ? '  (' + ts.dnsName + ')' : ''), 'mono');
+    if (ts.peers) html += line('Other devices', ts.peers);
+    html += line('Panel listens on', `${bind.host}:${bind.port}`, 'mono');
+    html += line('Bind type', (bind.kind || '?') + (bind.allowed === false ? '  — REFUSED' : ''), bind.allowed === false ? 'badge' : '');
+    if (r.serve && r.serve.enabled) html += line('HTTPS proxy', 'on (tailscale serve)');
+    if ((r.wireguard || {}).interfaces && r.wireguard.interfaces.length) {
+        html += line('WireGuard', r.wireguard.interfaces.join(', '), 'mono');
+    }
+    for (const w of r.reachableAt || []) {
+        html += line('Reachable at', `${w.url}  — ${w.from}`, 'mono');
+    }
+    if (bind.allowed === false && bind.reason) {
+        html += `<div style="margin-top:10px;" class="muted">The daemon will refuse to start: ${_escapeHtml(bind.reason)}</div>`;
+    } else if (ts.hint) {
+        html += `<div style="margin-top:10px;" class="muted">${_escapeHtml(ts.hint)}</div>`;
+    }
+    box.innerHTML = html;
+
+    if (authBox && ts.authUrl) {
+        authBox.textContent = 'Waiting for sign-in. Open this link on any device: ' + ts.authUrl;
     }
 }
 
@@ -2764,6 +2991,13 @@ function wire() {
             loadFiles(base + '/' + fsChip.dataset.folder);
             return;
         }
+        // Server screens: per-row buttons are delegated, so a refreshed table
+        // never leaves stale listeners behind.
+        const svcBtn = e.target.closest('[data-svc-action]');
+        if (svcBtn) { serviceAction(svcBtn.dataset.svc, svcBtn.dataset.svcAction); return; }
+        const fwDel = e.target.closest('[data-fw-del]');
+        if (fwDel) { firewallDelete(fwDel.dataset.fwDel); return; }
+
         const act = e.target.closest('[data-action]');
         if (!act) return;
         switch (act.dataset.action) {
@@ -2775,6 +3009,10 @@ function wire() {
                 break;
             }
             case 'tasks-refresh': refreshTasks(); break;
+            case 'svc-refresh': refreshServices(); break;
+            case 'log-refresh': refreshLogs(); break;
+            case 'fw-refresh': refreshFirewall(); break;
+            case 'remote-refresh': refreshRemote(); break;
             case 'ai-send': sendAI(); break;
             case 'updates-check': {
                 $('#update-status').textContent = 'checking…';
@@ -3189,6 +3427,38 @@ function wire() {
     // QoL — Settings search/filter.
     const setSearch = $('#settings-search');
     if (setSearch) setSearch.addEventListener('input', (e) => filterSettings(e.target.value));
+
+    // ----- Server screens ---------------------------------------------------
+    // Filtering is local to the cached list — no round trip per keystroke.
+    { const f = $('#svc-filter'); if (f) f.addEventListener('input', renderServices); }
+    { const u = $('#log-unit'); if (u) u.addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshLogs(); }); }
+    { const n = $('#log-lines'); if (n) n.addEventListener('change', refreshLogs); }
+    { const b = $('#fw-allow'); if (b) b.addEventListener('click', () => firewallAdd('allow')); }
+    { const b = $('#fw-deny'); if (b) b.addEventListener('click', () => firewallAdd('deny')); }
+    { const p = $('#fw-port'); if (p) p.addEventListener('keydown', (e) => { if (e.key === 'Enter') firewallAdd('allow'); }); }
+    { const t = $('#fw-toggle'); if (t) t.addEventListener('change', async () => {
+        const on = t.checked;
+        // Turning the firewall ON while connected over SSH, with no rule for
+        // port 22, drops the connection. Warn before doing it, not after.
+        if (on) {
+            const st = await op('firewall:status');
+            const hasSsh = (st.rules || []).some((x) => /(^|\D)22(\D|$)|ssh/i.test(x.target || ''));
+            if (!hasSsh) {
+                const go = await askConfirm({
+                    title: 'Turn the firewall on with no SSH rule?',
+                    reason: 'Nothing here allows port 22. If you are connected over SSH, enabling the firewall now will cut that connection and you will need physical access to the machine. Add a rule for 22/tcp first if you need SSH.',
+                    cmd: 'ufw enable',
+                });
+                if (!go) { t.checked = false; return; }
+            }
+        }
+        t.disabled = true;
+        const r = await op('firewall:set', { enabled: on });
+        t.disabled = false;
+        if (r.ok === false) { t.checked = !on; _fwMsg(r.error || 'Could not change the firewall.'); }
+        else { _fwMsg(on ? 'Firewall on.' : 'Firewall off.'); toast(on ? 'Firewall enabled.' : 'Firewall disabled.'); }
+        refreshFirewall();
+    }); }
     // QOL batch — calendar popover (topbar clock).
     { const ck = $('#stat-clock'); if (ck) ck.addEventListener('click', toggleCalPopover); }
     { const b = $('#cal-prev'); if (b) b.addEventListener('click', () => { _calMonth--; if (_calMonth < 0) { _calMonth = 11; _calYear--; } renderCal(); }); }

@@ -1565,9 +1565,51 @@ function syncIdleWatch() {
 }
 
 // ---------------------------------------------------------------------------
+// The server operations registry — ONE implementation, TWO transports
+// ---------------------------------------------------------------------------
+// Server features (services, journal, storage, remote access, firewall…) live
+// in outlaw-serverd/ops.js. The browser panel reaches them over POST /rpc; this
+// makes the SAME registry reachable from the Electron panel over IPC.
+//
+// Writing each server feature twice — once as an ipcMain handler and once as a
+// daemon op — is how the two frontends drift apart, and drift here means the
+// local console and the remote browser disagree about what the machine is
+// doing. One registry, two ways in.
+const serverOps = (() => {
+    const candidates = [
+        // Installed layout: shell at /usr/share/outlaw-os, daemon alongside it.
+        '/usr/share/outlaw-serverd/ops.js',
+        // Repo layout, for running the shell straight out of a checkout.
+        path.join(__dirname, '..', 'outlaw-serverd', 'ops.js'),
+    ];
+    for (const p of candidates) {
+        try { if (fs.existsSync(p)) return require(p); } catch { /* try the next */ }
+    }
+    return null;
+})();
+
+// ---------------------------------------------------------------------------
 // IPC handlers
 // ---------------------------------------------------------------------------
 function registerIpc() {
+    // Generic passthrough to the operations registry. This grants no privilege
+    // the renderer doesn't already have by name (power:reboot, proc:kill and
+    // services:action are all exposed individually above/below), and dispatch()
+    // refuses any name that isn't an own property of the registry, so it can't
+    // be walked into a prototype.
+    ipcMain.handle('ops:dispatch', async (_e, op, args) => {
+        if (!serverOps) {
+            return { ok: false, error: 'The server operations module is not installed on this machine.' };
+        }
+        try {
+            return await serverOps.dispatch(String(op || ''), args || {}, {
+                version: APP_VERSION, mode: 'panel', bind: 'electron-ipc',
+            });
+        } catch (e) {
+            return { ok: false, error: (e && e.message) || String(e) };
+        }
+    });
+
     ipcMain.handle('system:info', () => systemInfo());
 
     // ----- Keyboard layout -------------------------------------------------
