@@ -107,9 +107,6 @@ fi
 # ---- Launch the session under the crash-guard watchdog -------------------
 run_session() {
     case "$1" in
-        dev)
-            outlaw-session-watchdog dev outlaw-codemaker
-            ;;
         desktop)
             # shellcheck disable=SC2086  # intentional word-splitting of flags
             outlaw-session-watchdog desktop electron $ELECTRON_FLAGS /usr/share/outlaw-os

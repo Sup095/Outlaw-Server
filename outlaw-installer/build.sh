@@ -111,32 +111,9 @@ if [[ -d "$REPO_ROOT/outlaw-installer-gui" ]]; then
     rm -rf "$PROFILE_DIR/airootfs/usr/share/outlaw-installer-gui/node_modules" 2>/dev/null || true
 fi
 
-# Bundle Outlaw CodeMaker into /opt/outlaw-codemaker. The path can be
-# overridden with OUTLAW_CODEMAKER_SRC for non-standard checkouts. We try a
-# few sensible defaults so a sibling clone works out of the box. If nothing
-# is found, the bundle step skips with a warning and the greeter's Dev path
-# falls back to the desktop shell — the ISO still builds.
-echo "[4/7] Bundling Outlaw CodeMaker…"
-CM_DEFAULTS=(
-    "${OUTLAW_CODEMAKER_SRC:-}"
-    "$REPO_ROOT/../Outlaw CodeMaker"
-    "$REPO_ROOT/../outlaw-codemaker"
-    "$REPO_ROOT/outlaw-codemaker"
-)
-CM_SRC=""
-for path in "${CM_DEFAULTS[@]}"; do
-    if [[ -n "$path" && -f "$path/main.py" ]]; then
-        CM_SRC="$path"
-        break
-    fi
-done
-if [[ -n "$CM_SRC" ]]; then
-    "$HERE/bundle-codemaker.sh" "$CM_SRC" "$PROFILE_DIR/airootfs"
-else
-    echo "  ⚠ CodeMaker source not found in any default location."
-    echo "    Set OUTLAW_CODEMAKER_SRC=/abs/path/to/codemaker and re-run to include it."
-    echo "    Continuing without CodeMaker — the greeter's Dev path will fall back to desktop."
-fi
+# [4/7] intentionally left empty. Outlaw OS bundled the CodeMaker game-dev tool
+# here; Outlaw Server has no Dev session and ships no game-dev stack.
+echo "[4/7] (no extra bundles — server build)"
 
 # Enable services + live autologin-to-shell (creating symlinks on Linux side)
 echo "[5/7] Enabling services and autologin…"
@@ -172,8 +149,8 @@ sed -i \
 for f in outlaw-install outlaw-install-aur outlaw-electron-flags \
          outlaw-firstboot outlaw-start-session outlaw-hotswap outlaw-perf \
          outlaw-tune outlaw-update-apply outlaw-update-rollback outlaw-greeter \
-         outlaw-codemaker outlaw-lm-studio outlaw-session-watchdog \
-         outlaw-diagnose outlaw-focus outlaw-term outlaw-setup-dev \
+         outlaw-session-watchdog \
+         outlaw-diagnose outlaw-focus outlaw-term \
          outlaw-install-gui outlaw-pkg-install outlaw-update-pkgs \
          outlaw-driver-profile outlaw-swap; do
     if ! grep -q "/usr/local/bin/$f" "$PD"; then
