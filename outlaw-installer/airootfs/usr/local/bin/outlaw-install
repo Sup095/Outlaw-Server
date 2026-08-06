@@ -560,12 +560,6 @@ pacstrap_and_configure() {
     cp -rT /usr/share/outlaw-os "$TARGET/usr/share/outlaw-os" 2>/dev/null || true
     rm -rf "$TARGET/usr/share/outlaw-os/node_modules" 2>/dev/null || true
 
-    # Greeter Electron app (baked into the live ISO by build.sh). May be absent
-    # if the build skipped it; the launcher handles a missing bundle gracefully.
-    if [[ -d /usr/share/outlaw-greeter ]]; then
-        mkdir -p "$TARGET/usr/share/outlaw-greeter"
-        cp -rT /usr/share/outlaw-greeter "$TARGET/usr/share/outlaw-greeter"
-    fi
 
     # GUI installer app — copy it too so --uninstall / reinstall works offline.
     if [[ -d /usr/share/outlaw-installer-gui ]]; then

@@ -1,5 +1,5 @@
 // ============================================================================
-// Outlaw OS — Help database (Phase 6)
+// Outlaw Server — Help database (Phase 6)
 // ----------------------------------------------------------------------------
 // A structured, shipped-in-the-image docs database. Each entry explains one
 // part of the OS or one troubleshooting topic. The Help screen (renderer.js)
@@ -17,9 +17,9 @@ window.OUTLAW_HELP_CATS = [
 window.OUTLAW_HELP = [
     // ---- Getting started ---------------------------------------------------
     {
-        id: 'what-is', cat: 'Getting started', title: 'What is Outlaw OS?',
+        id: 'what-is', cat: 'Getting started', title: 'What is Outlaw Server?',
         keywords: 'overview about intro what outlaw os godot ai',
-        body: '<p><b>Outlaw OS</b> is a lightweight, security-minded Linux desktop built for '
+        body: '<p><b>Outlaw Server</b> is a lightweight, security-minded Linux desktop built for '
             + 'AI-driven game development with <b>Godot</b>. It has two sides: the <b>Desktop</b> '
             + '(this shell — apps, games, AI assistant, system tools) and the <b>Dev session</b> '
             + '(<b>Outlaw CodeMaker</b>, an AI agent that helps you build games). You pick which '
@@ -163,7 +163,7 @@ window.OUTLAW_HELP = [
 
     // ---- Settings & updates ------------------------------------------------
     {
-        id: 'updates', cat: 'Settings & updates', title: 'Updating Outlaw OS',
+        id: 'updates', cat: 'Settings & updates', title: 'Updating Outlaw Server',
         keywords: 'update updater shell channel stable beta repair package upgrade version',
         body: '<p><b>Settings → Outlaw Shell Updates</b> updates Outlaw itself (shell + all its '
             + 'components) with one click, and keeps the previous version for rollback. '
@@ -347,7 +347,7 @@ window.OUTLAW_HELP = [
         body: '<p>Press <b>Ctrl + Space</b> anywhere to open the <b>command palette</b> — one search box over '
             + 'every screen, settings section, help topic, app and common action (screenshot, lock, sleep, '
             + 'night light…). Type a few letters, pick with <b>↑ ↓</b>, run with <b>Enter</b>. It\'s the fastest '
-            + 'way to get anywhere in Outlaw OS.</p>',
+            + 'way to get anywhere in Outlaw Server.</p>',
     },
     {
         id: 'quick-settings', cat: 'The desktop', title: 'Quick settings (topbar ☰)',

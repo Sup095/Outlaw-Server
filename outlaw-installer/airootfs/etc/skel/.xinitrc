@@ -1,24 +1,23 @@
 #!/bin/sh
 # ============================================================================
-# Outlaw OS — desktop session launcher (installed system).
+# Outlaw Server — local console session launcher (installed system).
 # ----------------------------------------------------------------------------
-# Boot flow:
-#   FIRST boot (no ~/.outlaw-firstboot-done marker yet):
-#     1. Force the DESKTOP session — the greeter is skipped entirely. This is
-#        the most reliable path: it gets you to a known-good desktop where the
-#        first-boot wizard installs the optional bundles (Steam / Firefox /
-#        Godot) and you can confirm everything works.
-#     2. The wizard writes ~/.outlaw-firstboot-done when you finish or skip.
-#   LATER boots (marker present):
-#     3. Run the greeter so you can pick Dev or Desktop each boot.
+# This only runs when someone is physically at the machine with a monitor
+# attached. Headless servers never get here — they're managed from a browser or
+# over SSH, and X is never started.
 #
-#   The chosen session is then launched under the crash-guard watchdog:
-#     dev      → outlaw-codemaker (PyQt AI game-dev agent)
-#     desktop  → electron-wrapped /usr/share/outlaw-os (standard shell)
-#     tty      → exit X, dropping back to the login console
+# Boot flow:
+#   FIRST boot (no ~/.outlaw-firstboot-done marker yet): run setup, then show
+#     the panel. The wizard writes the marker when you finish or skip.
+#   LATER boots: straight to the panel. There is no session chooser — a server
+#     must not stop at a menu and wait for a human on every boot.
+#
+#   Sessions:
+#     panel  → electron-wrapped /usr/share/outlaw-os (the control panel)
+#     tty    → exit X, dropping back to the login console (headless boxes)
 #
 # All stderr goes to ~/.outlaw-x.log so silent Electron failures are
-# diagnosable. Fail-safe: anything missing/unreadable falls back to Desktop.
+# diagnosable. Fail-safe: anything missing/unreadable falls back to the panel.
 # ============================================================================
 
 XLOG="$HOME/.outlaw-x.log"
@@ -83,36 +82,41 @@ command -v xdg-user-dirs-update >/dev/null 2>&1 && xdg-user-dirs-update >/dev/nu
 # the session; runs regardless of the window manager.
 command -v dunst >/dev/null 2>&1 && dunst >/dev/null 2>&1 &
 
-# Electron flag set (adds --disable-gpu inside a VM). Used for greeter + shell.
+# Electron flag set (adds --disable-gpu inside a VM).
 ELECTRON_FLAGS="$(outlaw-electron-flags 2>/dev/null | tr '\n' ' ')"
 [ -z "$ELECTRON_FLAGS" ] && ELECTRON_FLAGS="--no-sandbox"
 
 # ---- Decide the session --------------------------------------------------
+# There is no session chooser on a server. A machine whose job is to stay up
+# does not stop at a menu on every boot and wait for someone to be standing in
+# front of it — it goes straight to the control panel.
+#
+# The one escape hatch: put "tty" in ~/.outlaw-session and X exits to a plain
+# console instead. That is the right choice for a headless box, and it is
+# exactly what `outlaw mode lean` is for.
 if [ ! -f "$HOME/.outlaw-firstboot-done" ]; then
-    # FIRST BOOT: install deps + go straight to Desktop. No greeter.
-    echo "[xinitrc] first boot — running setup wizard, forcing Desktop." >&2
+    echo "[xinitrc] first boot — running setup." >&2
     if command -v outlaw-firstboot >/dev/null 2>&1; then
-        outlaw-firstboot || echo "[xinitrc] first-boot wizard exited non-zero (continuing)." >&2
+        outlaw-firstboot || echo "[xinitrc] first-boot setup exited non-zero (continuing)." >&2
     fi
-    SESSION="desktop"
+    SESSION="panel"
 else
-    # LATER BOOTS: let the greeter pick (unless a kiosk override is set).
-    if [ "${OUTLAW_SKIP_GREETER:-0}" != "1" ]; then
-        outlaw-greeter || true
-    fi
     SESSION="$(head -n1 "$HOME/.outlaw-session" 2>/dev/null | tr -d '[:space:]')"
-    [ -z "$SESSION" ] && SESSION="desktop"
+    [ -z "$SESSION" ] && SESSION="panel"
 fi
 
 # ---- Launch the session under the crash-guard watchdog -------------------
 run_session() {
     case "$1" in
-        desktop)
+        tty)
+            return 0
+            ;;
+        # Anything else means "show me the panel". Defaulting this way (rather
+        # than falling through to a bare console) means a stale or hand-edited
+        # session file can never leave someone staring at a black screen.
+        panel|desktop|*)
             # shellcheck disable=SC2086  # intentional word-splitting of flags
             outlaw-session-watchdog desktop electron $ELECTRON_FLAGS /usr/share/outlaw-os
-            ;;
-        tty|*)
-            return 0
             ;;
     esac
 }

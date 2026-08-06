@@ -14,7 +14,7 @@
 <div id="signin" style="display:none;">
     <div class="signin-card">
         <div class="signin-logo">⛨</div>
-        <div class="signin-title">OUTLAW OS</div>
+        <div class="signin-title">OUTLAW SERVER</div>
         <div class="signin-user" id="signin-user">operator</div>
 
         <div id="signin-pin-mode" hidden>
@@ -52,7 +52,7 @@
     <div class="log" id="boot-log"></div>
     <div><span class="cursor"></span></div>
     <div class="actions" style="margin-top:16px;">
-        <button id="boot-skip" class="primary">Enter Outlaw OS</button>
+        <button id="boot-skip" class="primary">Enter Outlaw Server</button>
         <button id="boot-noai">Start without AI (low RAM)</button>
     </div>
 </div>
@@ -63,18 +63,14 @@
     <header class="topbar">
         <span class="brand">OUTLAW_SERVER</span>
         <span class="dim">// OPERATOR</span>
-        <span class="pill live-badge" id="live-badge" title="You're running the live demo — many features are locked until you install Outlaw OS to a disk." hidden>⚠ LIVE · LIMITED</span>
+        <span class="pill live-badge" id="live-badge" title="You're running the live demo — many features are locked until you install Outlaw Server to a disk." hidden>⚠ LIVE · LIMITED</span>
         <span class="spacer"></span>
         <button class="pill offline-pill" id="offline-pill" title="No internet connection — click to set up Wi-Fi" hidden>⚠ OFFLINE — set up Wi-Fi</button>
         <span class="stat pill" id="stat-cpu">CPU --%</span>
         <span class="stat pill" id="stat-ram">RAM --</span>
         <span class="stat pill" id="stat-ai">AI OFF</span>
-        <button class="stat pill" id="rec-pill" title="Recording the screen — click to stop" aria-label="Stop screen recording" hidden style="padding:4px 8px;">⏺ REC</button>
-        <button class="stat pill" id="quick-toggle" title="Quick settings" aria-label="Quick settings" style="padding:4px 8px;">☰</button>
-        <button class="stat pill" id="stat-volume" title="Volume" hidden style="padding:4px 8px;">🔊</button>
         <span class="stat pill" id="stat-battery" title="Battery" hidden></span>
         <button class="stat pill" id="stat-clock" title="Calendar" aria-label="Open the calendar" style="padding:4px 8px;">--:--:--</button>
-        <button class="nav-item" data-action="hotswap" title="Switch OS / boot menu" style="width:auto;padding:6px 10px;">⇄ HOTSWAP</button>
         <button data-action="power-menu" title="Power — lock, restart or shut down" aria-label="Power menu — lock, restart or shut down" style="padding:6px 10px;">⏻</button>
     </header>
 
@@ -99,14 +95,14 @@
                  only when running on the live system AND not previously
                  dismissed. Installed users never see this. -->
             <div class="card live-welcome" id="live-welcome" hidden>
-                <h2>👋  You're running Outlaw OS live</h2>
+                <h2>👋  You're running Outlaw Server live</h2>
                 <div class="dim" style="margin:6px 0 14px;">
                     Nothing has been installed yet. You can use the OS exactly like a
                     finished install — your changes just disappear when you reboot.
                     Ready to keep it permanently? Install to disk in a few clicks.
                 </div>
                 <div class="row" style="gap:10px;flex-wrap:wrap;">
-                    <button class="primary" id="live-install-btn">Install Outlaw OS</button>
+                    <button class="primary" id="live-install-btn">Install Outlaw Server</button>
                     <button id="live-dismiss-btn">Try it first</button>
                     <button class="dim" id="live-never-btn">Don't show again</button>
                 </div>
@@ -127,223 +123,6 @@
             <div class="grid apps" id="recent-apps"></div>
         </section>
 
-        <!-- System Core (SC1 scaffold — SC2 fills readouts, SC3+ runs diagnostics, SC5/6 add voice/AI) -->
-        <section class="screen" id="screen-syscore">
-            <div class="syscore-header">
-                <h2>SYSTEM CORE</h2>
-                <span class="syscore-tier sc-tier-free" id="sc-tier-badge" title="VRAM saver tier — change in Settings">VRAM: probing…</span>
-                <span class="syscore-mode" id="syscore-mode">COLD · standalone</span>
-                <button class="syscore-mode-toggle" id="sc-mode-toggle"
-                        type="button"
-                        title="Flip between Cold (canned dialogue, zero AI traffic) and Live (your AI engine answers + tool calls).">Go Live</button>
-            </div>
-            <details class="page-help">
-                <summary>What is the System Core?</summary>
-                <p>The System Core is your machine's <b>command center</b> — live status, the Core assistant, diagnostics, and one-tap actions (talk to Cr1tt3r, report a problem, take a screenshot, update). The rings show live <b>CPU, RAM and VRAM</b> use. The badge shows the current <b>VRAM-saver tier</b> (change it in Settings → AI / VRAM).</p>
-                <p><b>Cold mode</b> (default) uses built-in dialogue and sends <i>zero</i> AI traffic — fully offline and free. <b>Go Live</b> connects to your AI engine so the Core can answer questions and run safe actions for you (open an app, run a diagnostic, search files). It uses whichever engine you've set in <b>Settings → AI</b>: the <b>built-in base AI</b> (on by default, runs on almost any PC, nothing to install), a model you pull through <b>Ollama</b>, or a model you load in <b>LM Studio</b>. All of it runs locally — nothing leaves your machine.</p>
-                <p>Use the controls here to run a <b>system diagnostic</b>, watch temperatures, toggle <b>performance mode</b>, and talk to the Core. Nothing leaves your machine.</p>
-            </details>
-            <div class="core-stage" aria-hidden="true">
-                <svg class="core-ring outer" viewBox="0 0 200 200">
-                    <circle cx="100" cy="100" r="92" fill="none" stroke="var(--term-dim)" stroke-width="1.5"
-                            stroke-dasharray="22 14"/>
-                    <circle cx="100" cy="100" r="92" fill="none" stroke="var(--term-faint)" stroke-width="0.5"/>
-                </svg>
-                <svg class="core-ring middle" viewBox="0 0 200 200">
-                    <circle cx="100" cy="100" r="72" fill="none" stroke="var(--term)" stroke-width="1"
-                            stroke-dasharray="3 7" opacity="0.55"/>
-                </svg>
-                <svg class="core-ring inner" viewBox="0 0 200 200">
-                    <circle cx="100" cy="100" r="52" fill="none" stroke="var(--term)" stroke-width="2.5" opacity="0.55"/>
-                </svg>
-                <svg class="core-mark" viewBox="0 0 100 100">
-                    <!-- Outlaw star, hollow + center dot -->
-                    <polygon points="50,8 61,40 95,40 67,60 78,93 50,73 22,93 33,60 5,40 39,40"
-                             fill="none" stroke="var(--term)" stroke-width="1.8" stroke-linejoin="round"/>
-                    <circle cx="50" cy="50" r="5" fill="var(--term)"/>
-                </svg>
-                <div class="core-aura" aria-hidden="true"></div>
-            </div>
-            <div class="core-bubble" id="core-bubble" role="status" aria-live="polite"></div>
-            <div class="core-input" id="core-input" hidden>
-                <input type="text" id="core-input-text"
-                       placeholder="speak to the core…"
-                       aria-label="Message the System Core"
-                       maxlength="500"
-                       autocomplete="off" spellcheck="false">
-                <button id="core-input-send" type="button">Send</button>
-                <button id="core-input-reset" type="button" title="Clear conversation memory for this session">Reset</button>
-            </div>
-            <div class="core-readouts" id="core-readouts">
-                <!-- SC2: live stats polled every 2s while the screen is open. -->
-                <div class="core-readout empty" id="sc-cpu">
-                    <div class="label">CPU</div>
-                    <div class="value">—</div>
-                    <div class="sub">load</div>
-                </div>
-                <div class="core-readout empty" id="sc-mem">
-                    <div class="label">Memory</div>
-                    <div class="value">—</div>
-                    <div class="sub">used / total</div>
-                </div>
-                <div class="core-readout empty" id="sc-gpu">
-                    <div class="label">GPU · VRAM</div>
-                    <div class="value">—</div>
-                    <div class="sub">probing…</div>
-                </div>
-                <div class="core-readout empty" id="sc-disk">
-                    <div class="label">Disk</div>
-                    <div class="value">—</div>
-                    <div class="sub">/ partition</div>
-                </div>
-                <div class="core-readout empty" id="sc-net">
-                    <div class="label">Network</div>
-                    <div class="value">—</div>
-                    <div class="sub">↓ ↑ throughput</div>
-                </div>
-                <div class="core-readout empty" id="sc-uptime">
-                    <div class="label">Uptime</div>
-                    <div class="value">—</div>
-                    <div class="sub">since boot</div>
-                </div>
-            </div>
-
-            <!-- SC3 diagnostics: three-tier test runner, streams progress over
-                 'diagnostics-progress'. Idle by default — zero polling, zero
-                 subprocesses until the user picks a tier. -->
-            <div class="core-diagnostics card" id="sc-diagnostics">
-                <div class="syscore-subhead">
-                    <h3>DIAGNOSTICS</h3>
-                    <span class="dim mono" id="sc-diag-status" aria-live="polite" aria-atomic="true">idle</span>
-                </div>
-                <div class="diag-controls">
-                    <button id="diag-run-quick" data-diag-profile="quick">QUICK · ~30s</button>
-                    <button id="diag-run-standard" data-diag-profile="standard">STANDARD · ~2m</button>
-                    <button id="diag-run-thorough" data-diag-profile="thorough">THOROUGH · ~10m</button>
-                    <span class="spacer"></span>
-                    <button id="diag-cancel" class="danger" hidden>Cancel</button>
-                </div>
-                <div class="diag-progress" id="diag-progress" hidden>
-                    <div class="diag-bar-track"><span id="diag-bar"></span></div>
-                    <div class="dim mono" id="diag-progress-msg" aria-live="polite">—</div>
-                </div>
-                <div class="diag-results" id="diag-results">
-                    <div class="dim" style="padding:14px 0;">No diagnostic run yet. Pick a tier to begin.</div>
-                </div>
-                <details class="diag-history">
-                    <summary>Past reports (~/.outlaw-diagnostics/)</summary>
-                    <div id="diag-history-list" class="dim mono" style="padding:8px 0;">loading…</div>
-                </details>
-                <details class="diag-schedule" id="diag-schedule">
-                    <summary>Schedule · run checks automatically</summary>
-                    <div class="diag-sched-rows">
-                        <div class="diag-sched-row" data-sched-id="daily">
-                            <div class="diag-sched-label">
-                                <div class="diag-sched-name">Daily quick</div>
-                                <div class="diag-sched-meta dim mono">03:00 local · ~30s</div>
-                            </div>
-                            <div class="diag-sched-info">
-                                <div class="dim mono" data-sched-next>next: —</div>
-                                <div class="dim mono" data-sched-last>last: —</div>
-                            </div>
-                            <div class="diag-sched-actions">
-                                <button class="diag-sched-runnow" type="button">Run now</button>
-                                <label class="switch"><input type="checkbox" data-sched-toggle><span class="track"></span></label>
-                            </div>
-                        </div>
-                        <div class="diag-sched-row" data-sched-id="weekly">
-                            <div class="diag-sched-label">
-                                <div class="diag-sched-name">Weekly standard</div>
-                                <div class="diag-sched-meta dim mono">Sat 04:00 local · ~2m</div>
-                            </div>
-                            <div class="diag-sched-info">
-                                <div class="dim mono" data-sched-next>next: —</div>
-                                <div class="dim mono" data-sched-last>last: —</div>
-                            </div>
-                            <div class="diag-sched-actions">
-                                <button class="diag-sched-runnow" type="button">Run now</button>
-                                <label class="switch"><input type="checkbox" data-sched-toggle><span class="track"></span></label>
-                            </div>
-                        </div>
-                        <div class="diag-sched-row" data-sched-id="monthly">
-                            <div class="diag-sched-label">
-                                <div class="diag-sched-name">Monthly thorough</div>
-                                <div class="diag-sched-meta dim mono">1st of month 04:00 · ~10m, includes ClamAV</div>
-                            </div>
-                            <div class="diag-sched-info">
-                                <div class="dim mono" data-sched-next>next: —</div>
-                                <div class="dim mono" data-sched-last>last: —</div>
-                            </div>
-                            <div class="diag-sched-actions">
-                                <button class="diag-sched-runnow" type="button">Run now</button>
-                                <label class="switch"><input type="checkbox" data-sched-toggle><span class="track"></span></label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="dim mono" style="margin-top:6px;font-size:10px;letter-spacing:1px;">
-                        Timers run outside the shell. Closing the desktop does NOT stop scheduled checks.
-                    </div>
-                </details>
-            </div>
-
-            <!-- SC2 inventory: static info loaded once per screen visit. -->
-            <div class="core-inventory card" id="sc-inventory">
-                <div class="syscore-subhead"><h3>INVENTORY</h3><span class="dim mono" id="sc-inv-status">loading…</span></div>
-                <div class="inv-grid">
-                    <div><span class="inv-label">Host</span><span class="inv-value" id="inv-host">—</span></div>
-                    <div><span class="inv-label">Kernel</span><span class="inv-value" id="inv-kernel">—</span></div>
-                    <div><span class="inv-label">Shell</span><span class="inv-value" id="inv-shell">—</span></div>
-                    <div><span class="inv-label">Packages</span><span class="inv-value" id="inv-pkgs">—</span></div>
-                    <div><span class="inv-label">Session pref</span><span class="inv-value" id="inv-sesspref">—</span></div>
-                    <div><span class="inv-label">Boot since</span><span class="inv-value" id="inv-boot">—</span></div>
-                    <div><span class="inv-label">Snapshots</span><span class="inv-value" id="inv-snap">—</span></div>
-                    <div><span class="inv-label">AppArmor</span><span class="inv-value" id="inv-aa">—</span></div>
-                    <div><span class="inv-label">Firewall</span><span class="inv-value" id="inv-ufw">—</span></div>
-                </div>
-            </div>
-
-            <div class="core-control card" id="sc-control">
-                <div class="syscore-subhead"><h3>SYSTEM CONTROL</h3><span class="dim mono" id="sc-control-status"></span></div>
-                <div class="sc-control-grid">
-                    <button class="sc-control-btn" data-sc-control="update-os">
-                        <span class="sc-ctl-ico">⟳</span><span class="sc-ctl-label">Update Outlaw OS</span>
-                        <span class="sc-ctl-sub">check &amp; install the latest release</span>
-                    </button>
-                    <button class="sc-control-btn" data-sc-control="update-packages">
-                        <span class="sc-ctl-ico">📦</span><span class="sc-ctl-label">Update Software</span>
-                        <span class="sc-ctl-sub">refresh all installed packages</span>
-                    </button>
-                    <button class="sc-control-btn" data-sc-control="perf">
-                        <span class="sc-ctl-ico">⚡</span><span class="sc-ctl-label" id="sc-ctl-perf-label">Performance Mode</span>
-                        <span class="sc-ctl-sub" id="sc-ctl-perf-sub">toggle the gaming CPU governor</span>
-                    </button>
-                    <button class="sc-control-btn" data-sc-control="diagnostics">
-                        <span class="sc-ctl-ico">✓</span><span class="sc-ctl-label">Run Diagnostics</span>
-                        <span class="sc-ctl-sub">quick health check</span>
-                    </button>
-                    <button class="sc-control-btn" data-sc-control="settings">
-                        <span class="sc-ctl-ico">⚙</span><span class="sc-ctl-label">All Settings</span>
-                        <span class="sc-ctl-sub">channel, updates, voice, more</span>
-                    </button>
-                    <button class="sc-control-btn" data-sc-control="ask-ai">
-                        <span class="sc-ctl-ico">💬</span><span class="sc-ctl-label">Ask Cr1tt3r</span>
-                        <span class="sc-ctl-sub">your AI assistant</span>
-                    </button>
-                    <button class="sc-control-btn" data-sc-control="report">
-                        <span class="sc-ctl-ico">⚑</span><span class="sc-ctl-label">Report a Problem</span>
-                        <span class="sc-ctl-sub" id="sc-ctl-report-sub">collect &amp; send the error log</span>
-                    </button>
-                    <button class="sc-control-btn" data-sc-control="screenshot">
-                        <span class="sc-ctl-ico">📷</span><span class="sc-ctl-label">Screenshot</span>
-                        <span class="sc-ctl-sub">save a picture of your screen (PrtSc)</span>
-                    </button>
-                </div>
-            </div>
-
-            <div class="core-footer">
-                <span class="dim" id="core-footer-msg">core dormant · no AI traffic · no diagnostics</span>
-            </div>
-        </section>
 
         <!-- Files -->
         <section class="screen" id="screen-files">
@@ -415,44 +194,7 @@
             <input id="term-in" placeholder="> command…  (destructive commands require confirmation)" autocomplete="off" spellcheck="false">
         </section>
 
-        <!-- Gaming -->
-        <section class="screen" id="screen-gaming">
-            <h2>Gaming Center</h2>
-            <div class="card">
-                <div class="setting">
-                    <div class="label">Performance mode<small>CPU governor → performance, enables GameMode hints</small></div>
-                    <label class="switch"><input type="checkbox" id="perf-toggle"><span class="track"></span></label>
-                </div>
-                <div id="gaming-status" class="dim mono" style="margin-top:10px;">Detecting GPU…</div>
-            </div>
-            <h3>Launch</h3>
-            <div class="grid apps" id="gaming-apps"></div>
-            <div class="card" style="margin-top:16px;">
-                <h3>Run a game with optimizations</h3>
-                <div class="muted">Prefix any launch with <span class="mono">gamemoderun mangohud %command%</span> in Steam → Properties → Launch Options for FPS overlay + governor boost. Native + Proton titles both supported.</div>
-            </div>
-            <div class="card" style="margin-top:12px;">
-                <h3>More launchers</h3>
-                <div class="muted">
-                    Lutris, Wine, Winetricks, and Discord aren't pre-installed —
-                    grab them from <strong>Apps</strong> in the sidebar when you need them.
-                </div>
-            </div>
-        </section>
 
-        <!-- Game Dev -->
-        <section class="screen" id="screen-gamedev">
-            <h2>Game Development</h2>
-            <div class="grid apps" id="gamedev-apps"></div>
-            <div class="card" style="margin-top:16px;">
-                <h3>Toolchain</h3>
-                <div class="muted">
-                    Pre-installed: <span class="mono">godot · git · python · base-devel · cmake · steamcmd</span>.
-                    Want Blender, GIMP, VS Code, Krita, Inkscape, Aseprite, Audacity, or Tiled? Open <strong>Apps</strong>
-                    in the sidebar and install on demand.
-                </div>
-            </div>
-        </section>
 
         <!-- Apps (on-demand installer over the curated catalog) -->
         <section class="screen" id="screen-apps">
@@ -547,20 +289,6 @@
             </div>
         </section>
 
-        <!-- Calculator -->
-        <section class="screen" id="screen-calc">
-            <h2>Calculator</h2>
-            <div class="calc">
-                <input id="calc-display" readonly value="0">
-                <div class="calc-grid" id="calc-pad">
-                    <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="/">÷</button>
-                    <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="*">×</button>
-                    <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="-">−</button>
-                    <button data-k="0">0</button><button data-k=".">.</button><button data-k="=" class="primary">=</button><button data-k="+">+</button>
-                    <button data-k="C" class="danger" style="grid-column:span 4;">CLEAR</button>
-                </div>
-            </div>
-        </section>
 
         <!-- Settings -->
         <section class="screen" id="screen-settings">
@@ -568,7 +296,7 @@
             <details class="page-help">
                 <summary>What's in Settings?</summary>
                 <p><b>Network &amp; Wi-Fi</b> — connect to Wi-Fi and see your connection. <b>Security &amp; sign-in</b> — set a 4-digit PIN and require sign-in on startup. <b>Appearance</b> — switch theme (Green Phosphor / Gold Gunmetal) and the optional CRT effect.</p>
-                <p><b>AI &amp; VRAM</b> — turn the local AI on/off and pick how aggressively it saves video memory. <b>System Package Updates</b> — check for and apply updates to every installed app + the system. <b>Outlaw Shell Updates</b> — update Outlaw OS itself and choose the stable or beta channel. <b>Help Test This Version</b> — tell the maintainer whether this build works. <b>Report a problem</b> — send the error log to the maintainer.</p>
+                <p><b>AI &amp; VRAM</b> — turn the local AI on/off and pick how aggressively it saves video memory. <b>System Package Updates</b> — check for and apply updates to every installed app + the system. <b>Outlaw Shell Updates</b> — update Outlaw Server itself and choose the stable or beta channel. <b>Help Test This Version</b> — tell the maintainer whether this build works. <b>Report a problem</b> — send the error log to the maintainer.</p>
             </details>
 
             <input type="text" id="settings-search" placeholder="🔍 Search settings…" autocomplete="off" spellcheck="false"
@@ -591,35 +319,7 @@
                 </div>
             </div>
 
-            <div class="card">
-                <h3>Session</h3>
-                <div class="setting">
-                    <div class="label">Switch to Dev session<small>Closes the desktop and opens Outlaw CodeMaker (the AI game-dev agent). X restarts and skips the greeter once.</small></div>
-                    <button id="session-switch-dev" type="button">Switch now</button>
-                </div>
-                <div class="setting">
-                    <div class="label">Show greeter on next boot<small>If you ticked "Always start in this session" at the greeter, this resets it so the chooser appears again.</small></div>
-                    <button id="session-reset-pref" type="button">Reset preference</button>
-                </div>
-            </div>
 
-            <div class="card">
-                <h3>Session graphics profile</h3>
-                <details class="page-help">
-                    <summary>What is this?</summary>
-                    <p>Installs the <b>gaming/desktop graphics stack</b> for your GPU — Vulkan, Mesa and the 32-bit libraries Steam &amp; Proton need, plus GameMode and MangoHUD. It's <b>userspace only</b>: it never changes kernel drivers, the boot loader or your display mode, so it can't stop the machine booting. Use <b>lean</b> for dev/planning. Applied after boot via the package manager, and fully revertible. <i>(NVIDIA: this installs the userspace libraries only — the NVIDIA kernel driver touches the boot path and isn't installed automatically.)</i></p>
-                </details>
-                <div class="muted" style="margin-bottom:8px;">GPU: <span id="drv-gpu" class="mono">…</span> · Currently: <span id="drv-state" class="mono">…</span></div>
-                <div class="setting">
-                    <div class="label">Gaming / Desktop graphics<small id="drv-preview">Vulkan + Mesa + 32-bit libs + GameMode/MangoHUD</small></div>
-                    <button id="drv-apply" type="button">Install gaming stack</button>
-                </div>
-                <div class="setting">
-                    <div class="label">Lean (dev / planning)<small>Removes the gaming extras; keeps Vulkan/Mesa so nothing breaks.</small></div>
-                    <button id="drv-revert" type="button">Switch to lean</button>
-                </div>
-                <div id="drv-out" class="muted mono" style="margin-top:6px;white-space:pre-wrap;font-size:11px;"></div>
-            </div>
 
             <div class="card">
                 <h3>Local AI Assistant</h3>
@@ -651,19 +351,6 @@
                     <button id="ai-open-lmstudio" type="button">Open LM Studio</button>
                 </div>
                 <div class="setting">
-                    <div class="label">System Core voice<small id="voice-sub">Off · text-only bubble</small></div>
-                    <label class="switch"><input type="checkbox" id="voice-toggle"><span class="track"></span></label>
-                </div>
-                <div class="setting">
-                    <div class="label">Aggressive VRAM saver<small id="vram-mode-sub">probing…</small></div>
-                    <select id="vram-mode" aria-label="Aggressive VRAM saver mode" style="width:auto;min-width:160px;">
-                        <option value="auto">Auto · kicks in below 600 MB free</option>
-                        <option value="off">Off · never trim, even when low</option>
-                        <option value="lean">Always Lean · halve contexts always</option>
-                        <option value="minimal">Always Minimal · bare-bones always</option>
-                    </select>
-                </div>
-                <div class="setting">
                     <div class="label">Use storage as extra memory<small id="swap-sub">Adds a swapfile so a low-RAM PC won't run out of memory under AI load — slower than real RAM, fully reversible.</small></div>
                     <label class="switch"><input type="checkbox" id="swap-toggle"><span class="track"></span></label>
                 </div>
@@ -681,23 +368,12 @@
                     <button id="wifi-scan">⟳ Scan for Wi-Fi</button>
                 </div>
                 <div id="wifi-list" class="wifi-list"></div>
-                <div class="setting" id="bt-row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
-                    <div class="label">🔵 Bluetooth<small id="bt-status-sub">Checking…</small></div>
-                    <div class="row" style="gap:6px;align-items:center;">
-                        <label class="switch" title="Turn the Bluetooth adapter on or off"><input type="checkbox" id="bt-toggle" aria-label="Bluetooth power"><span class="track"></span></label>
-                        <button id="bt-manage-btn" title="Open the Bluetooth manager to pair and connect devices">Pair a device…</button>
-                    </div>
-                </div>
             </div>
 
             <div class="card" id="region-card">
-                <h3>Region &amp; Input</h3>
+                <h3>Time &amp; Clock</h3>
                 <div class="setting">
-                    <div class="label">Keyboard layout<small>Which key mapping your keyboard uses. Applied right away and on every boot.</small></div>
-                    <select id="kb-layout" aria-label="Keyboard layout" style="width:auto;min-width:200px;"></select>
-                </div>
-                <div class="setting">
-                    <div class="label">Time zone<small id="tz-sub">Sets your clock's time zone.</small></div>
+                    <div class="label">Time zone<small id="tz-sub">Sets your clock's time zone. Worth getting right: every log line, certificate and sign-in code is stamped with it.</small></div>
                     <select id="tz-select" aria-label="Time zone" style="width:auto;min-width:220px;"></select>
                 </div>
                 <div class="setting">
@@ -707,73 +383,8 @@
                 <div id="region-msg" class="muted" aria-live="polite" style="font-size:12px;min-height:14px;"></div>
             </div>
 
-            <div class="card" id="desktop-card">
-                <h3>Desktop &amp; Notifications</h3>
-                <div class="setting">
-                    <div class="label">🌙 Night light<small id="nightlight-sub">Warms the screen's colors to reduce blue light in the evening.</small></div>
-                    <label class="switch" title="Warm the screen to reduce blue light"><input type="checkbox" id="nightlight-toggle" aria-label="Night light"><span class="track"></span></label>
-                </div>
-                <div class="setting" id="nightlight-warmth-row">
-                    <div class="label">Warmth<small>How warm the tint is when night light is on.</small></div>
-                    <select id="nightlight-temp" aria-label="Night light warmth" style="width:auto;min-width:160px;">
-                        <option value="5000">Subtle</option>
-                        <option value="4000">Warm</option>
-                        <option value="3400">Warmer</option>
-                        <option value="2700">Warmest</option>
-                    </select>
-                </div>
-                <div class="setting" style="border-top:1px solid var(--line);padding-top:12px;">
-                    <div class="label">🔕 Do Not Disturb<small id="dnd-sub">Silence pop-up notifications. They're still collected while paused.</small></div>
-                    <div class="row" style="gap:6px;align-items:center;">
-                        <label class="switch" title="Pause notification pop-ups"><input type="checkbox" id="dnd-toggle" aria-label="Do Not Disturb"><span class="track"></span></label>
-                        <button id="dnd-show-last" title="Re-show the most recent notification">Show last</button>
-                    </div>
-                </div>
-                <div class="setting">
-                    <div class="label">Recent notifications<small>The latest pop-ups, so a missed toast isn't lost.</small></div>
-                    <button id="notif-history-btn" title="Show the most recent notifications">Show recent</button>
-                </div>
-                <div id="notif-history" class="muted" style="display:none;font-size:12px;max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-top:6px;"></div>
-                <div id="desktop-msg" class="muted" aria-live="polite" style="font-size:12px;min-height:14px;"></div>
-            </div>
 
-            <div class="card" id="display-card">
-                <h3>Display</h3>
-                <div id="display-outputs"><div class="muted">Checking displays…</div></div>
-                <div class="setting" id="brightness-row" hidden>
-                    <div class="label">Brightness<small id="brightness-sub">Screen backlight (laptops). It can dim, but never goes fully dark.</small></div>
-                    <input type="range" id="brightness-slider" min="5" max="100" aria-label="Screen brightness" style="width:200px;">
-                </div>
-                <div class="row" style="gap:8px;margin-top:6px;">
-                    <button id="display-reset" title="Back to every display's native (preferred) mode">Reset to automatic</button>
-                    <span id="display-msg" class="muted" aria-live="polite" style="font-size:12px;"></span>
-                </div>
-            </div>
 
-            <div class="card" id="power-card">
-                <h3>Power</h3>
-                <div class="setting">
-                    <div class="label">Turn off the screen when idle<small>Blanks the display after a period of no activity. Any key wakes it.</small></div>
-                    <select id="screenblank-select" aria-label="Turn off the screen when idle" style="width:auto;min-width:170px;">
-                        <option value="-1">System default</option>
-                        <option value="0">Never</option>
-                        <option value="5">After 5 minutes</option>
-                        <option value="10">After 10 minutes</option>
-                        <option value="15">After 15 minutes</option>
-                        <option value="30">After 30 minutes</option>
-                    </select>
-                </div>
-                <div class="setting">
-                    <div class="label">Sleep when idle<small>Suspends the whole computer after a period of no keyboard/mouse activity — press a key or the power button to wake. Heads up: controller-only play can look idle, so pick a long timeout (or Never) if you game with a gamepad.</small></div>
-                    <select id="autosleep-select" aria-label="Sleep when idle" style="width:auto;min-width:170px;">
-                        <option value="0">Never</option>
-                        <option value="15">After 15 minutes</option>
-                        <option value="30">After 30 minutes</option>
-                        <option value="60">After 1 hour</option>
-                        <option value="120">After 2 hours</option>
-                    </select>
-                </div>
-            </div>
 
             <div class="card" id="security-card">
                 <h3>Security &amp; sign-in</h3>
@@ -857,7 +468,7 @@
                 <div class="muted" style="margin-bottom:8px;">Installed: <span id="app-version" class="mono">…</span></div>
                 <div class="setting">
                     <div class="label">GitHub repository<small>owner/repo — where releases are published</small></div>
-                    <input id="update-repo" aria-label="GitHub repository (owner/repo)" placeholder="your-username/Outlaw-OS-main" style="width:auto;min-width:260px;">
+                    <input id="update-repo" aria-label="GitHub repository (owner/repo)" placeholder="Sup095/Outlaw-Server" style="width:auto;min-width:260px;">
                 </div>
                 <div class="setting">
                     <div class="label">Update channel<small>Stable = only tested releases · Beta = the newest builds (help test)</small></div>
@@ -906,7 +517,7 @@
                     <span class="spacer"></span>
                     <span class="rm-version mono" id="roadmap-version"></span>
                 </div>
-                <div class="muted" style="margin:6px 0 12px;">Where Outlaw OS is headed — tap a section to expand. Updates as releases ship.</div>
+                <div class="muted" style="margin:6px 0 12px;">Where Outlaw Server is headed — tap a section to expand. Updates as releases ship.</div>
                 <div id="roadmap-view"></div>
             </div>
 
@@ -946,7 +557,7 @@
                     <button data-action="hotswap">⇄ Hotswap to another OS</button>
                     <button data-action="installer">Open Installer</button>
                 </div>
-                <div class="muted" style="margin-top:8px;">Hotswap sets the next boot to another installed OS (or opens the boot menu). The installer can set up or remove Outlaw OS — your other OS and data stay untouched unless you explicitly choose to wipe.</div>
+                <div class="muted" style="margin-top:8px;">Hotswap sets the next boot to another installed OS (or opens the boot menu). The installer can set up or remove Outlaw Server — your other OS and data stay untouched unless you explicitly choose to wipe.</div>
             </div>
 
             <div class="card" id="report-card">
@@ -968,7 +579,7 @@
                 <button id="help-replay-tour" type="button" title="Replay the welcome tour">▶ Replay tour</button>
                 <input id="help-search" placeholder="Search help…" autocomplete="off" style="width:auto;flex:0 1 280px;min-width:180px;">
             </div>
-            <p class="muted" style="margin:0 0 12px;">Everything about Outlaw OS — how each part works and how to fix common problems. Click a topic to expand it.</p>
+            <p class="muted" style="margin:0 0 12px;">Everything about Outlaw Server — how each part works and how to fix common problems. Click a topic to expand it.</p>
             <div id="help-results"></div>
         </section>
 
@@ -993,16 +604,6 @@
 <!-- Display keep/revert countdown. The REAL revert timer runs in the main
      process — this dialog is just the visible half. If the user can't see or
      click anything (bad mode), main restores the old mode on its own. -->
-<div class="modal-bg" id="disp-confirm">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="disp-confirm-title">
-        <h3 id="disp-confirm-title">Keep these display settings?</h3>
-        <p class="muted">Reverting to the previous mode in <b id="disp-count">15</b>s unless you keep them.</p>
-        <div class="row">
-            <button id="disp-keep" class="primary">Keep settings</button>
-            <button id="disp-revert">Revert now</button>
-        </div>
-    </div>
-</div>
 
 <div class="modal-bg" id="power-modal">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="power-title">
@@ -1025,43 +626,8 @@
 <div id="brk-toasts" aria-hidden="true"></div>
 <div id="brk-flash" aria-hidden="true" hidden><span>◧ SIGNAL LOST ◧</span></div>
 <!-- Round-2 QOL — volume slider popover (opened from the topbar speaker). -->
-<div id="volume-popover" hidden>
-    <div class="row" style="gap:10px;align-items:center;">
-        <button id="vol-mute" title="Mute / unmute" aria-label="Mute or unmute" style="padding:6px 9px;">🔊</button>
-        <input type="range" id="vol-slider" min="0" max="100" value="50" aria-label="Volume" style="flex:1;min-width:130px;">
-        <span id="vol-pct" class="mono" style="min-width:38px;text-align:right;">50%</span>
-    </div>
-    <!-- Output device picker — only shown when there's more than one sink. -->
-    <div id="vol-sinks" hidden></div>
-</div>
 
 <!-- QOL batch — quick-settings popover (topbar ☰): the everyday toggles in one place. -->
-<div id="quick-popover" role="dialog" aria-label="Quick settings" hidden>
-    <div class="qk-grid">
-        <button class="qk-tile" id="qk-nightlight" aria-pressed="false" title="Warm the screen's colors">🌙<span>Night light</span></button>
-        <button class="qk-tile" id="qk-dnd" aria-pressed="false" title="Pause notification pop-ups">🔕<span>Do Not Disturb</span></button>
-        <button class="qk-tile" id="qk-airplane" aria-pressed="false" title="Turn Wi-Fi and Bluetooth off">✈<span>Airplane</span></button>
-        <button class="qk-tile" id="qk-perf" aria-pressed="false" title="Gaming performance mode">🚀<span>Performance</span></button>
-    </div>
-    <div class="row" id="qk-vol-row" style="gap:8px;margin-top:10px;align-items:center;" hidden>
-        <span aria-hidden="true">🔊</span>
-        <input type="range" id="qk-vol" min="0" max="100" aria-label="Volume" style="flex:1;min-width:120px;">
-        <span id="qk-vol-pct" class="mono" style="min-width:38px;text-align:right;">--%</span>
-    </div>
-    <div class="row" id="qk-bright-row" style="gap:8px;margin-top:10px;align-items:center;" hidden>
-        <span aria-hidden="true">🔆</span>
-        <input type="range" id="qk-bright" min="5" max="100" aria-label="Screen brightness" style="flex:1;min-width:120px;">
-        <span id="qk-bright-pct" class="mono" style="min-width:38px;text-align:right;">--%</span>
-    </div>
-    <div class="row" style="gap:6px;margin-top:10px;flex-wrap:wrap;">
-        <button id="qk-screenshot" title="Take a screenshot (PrtSc)" aria-label="Take a screenshot" style="padding:7px 10px;">📷</button>
-        <button id="qk-record" title="Record the screen (saves to Videos)" aria-label="Record the screen" style="padding:7px 10px;">🎥</button>
-        <button id="qk-lock" title="Lock the screen" aria-label="Lock the screen" style="padding:7px 10px;">🔒</button>
-        <button id="qk-sleep" title="Put the computer to sleep" aria-label="Sleep" style="padding:7px 10px;">💤</button>
-        <span class="spacer"></span>
-        <button id="qk-settings" title="Open all settings">⚙ All settings</button>
-    </div>
-</div>
 
 <!-- QOL batch — calendar popover (topbar clock). Pure client-side month view. -->
 <div id="cal-popover" role="dialog" aria-label="Calendar" hidden>

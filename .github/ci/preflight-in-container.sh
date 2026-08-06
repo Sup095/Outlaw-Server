@@ -27,7 +27,11 @@ pacman-key --populate archlinux >/dev/null 2>&1
 if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
   printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
 fi
-retry pacman -Syu --noconfirm --disable-download-timeout
+# -Sy, NOT -Syu. All we need is the sync databases to query against; upgrading
+# every package in a throwaway container is several minutes of pure waste (it is
+# what pushed this job past its timeout). The usual "never -Sy on Arch" warning
+# is about partial upgrades on a real system — nothing is installed here.
+retry pacman -Sy --noconfirm --disable-download-timeout
 
 PKGFILE="/work/${INSTALLER_DIR}/packages.x86_64"
 INSTALLER="/work/${INSTALLER_DIR}/airootfs/usr/local/bin/outlaw-install"
@@ -49,16 +53,33 @@ printf '%s\n' "$ALL" | tr '\n' ' '; echo
 echo "::endgroup::"
 
 echo "::group::Resolving against the repos"
+# Fast path: ask about every package in ONE pacman call. Spawning ~55 separate
+# `pacman -Si` processes (each re-reading the sync databases) is what made this
+# step slow enough to hit the job timeout.
 MISSING=""
-while IFS= read -r pkg; do
-  [[ -z "$pkg" ]] && continue
-  if pacman -Si -- "$pkg" >/dev/null 2>&1; then
-    echo "  ok   $pkg"
-  else
-    echo "  MISS $pkg"
-    MISSING="$MISSING $pkg"
+# shellcheck disable=SC2086  # deliberate word-splitting: $ALL is a package list
+if pacman -Si -- $ALL >/dev/null 2>/tmp/pacman-si.err; then
+  echo "  all $COUNT packages resolved in a single query"
+else
+  # Something didn't resolve. pacman names the offenders on stderr; re-check
+  # only those individually so the reported list is exact rather than inferred
+  # from a message format that could change between releases.
+  SUSPECT="$(sed -n "s/^error: package '\(.*\)' was not found$/\1/p" /tmp/pacman-si.err | sort -u)"
+  if [[ -z "$SUSPECT" ]]; then
+    # Unrecognised failure — fall back to the slow-but-certain path.
+    echo "::warning::batch query failed without naming a package; checking one by one."
+    SUSPECT="$ALL"
   fi
-done <<< "$ALL"
+  while IFS= read -r pkg; do
+    [[ -z "$pkg" ]] && continue
+    if pacman -Si -- "$pkg" >/dev/null 2>&1; then
+      echo "  ok   $pkg"
+    else
+      echo "  MISS $pkg"
+      MISSING="$MISSING $pkg"
+    fi
+  done <<< "$SUSPECT"
+fi
 echo "::endgroup::"
 
 if [[ -n "${MISSING// /}" ]]; then

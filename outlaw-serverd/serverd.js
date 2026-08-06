@@ -51,7 +51,7 @@ const auth = require('./auth');
 const remote = require('./remote');
 const config = require('./config');
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const CONFIG_PATH = config.CONFIG_PATH;
 
 const loadConfig = config.load;

@@ -1,12 +1,10 @@
 #!/bin/sh
 # ============================================================================
-# Outlaw OS — live session launcher (USB-boot ISO).
+# Outlaw Server — live session launcher (USB-boot ISO).
 # ----------------------------------------------------------------------------
-# The live image autologins as root. It goes STRAIGHT TO THE DESKTOP — no
-# greeter — because (a) the desktop is where the "Install Outlaw OS" welcome
-# card lives, and (b) it's the most reliable path on a fresh VM. You can still
-# switch to the Dev session from the shell's Settings (it writes
-# /root/.outlaw-session and relaunches).
+# The live image autologins as root and goes STRAIGHT TO THE PANEL, because
+# that is where the "Install Outlaw Server" welcome card lives and it is the
+# most reliable path on a fresh VM.
 #
 # No first-boot wizard here: the live environment is ephemeral (tmpfs), so
 # installing optional bundles into RAM would be wasteful. The wizard runs on
@@ -84,12 +82,14 @@ SESSION="$(head -n1 /root/.outlaw-session 2>/dev/null | tr -d '[:space:]')"
 
 run_session() {
     case "$1" in
-        desktop)
+        tty)
+            return 0
+            ;;
+        # Anything else shows the panel — a stale session file must never leave
+        # the live ISO sitting at a black screen.
+        panel|desktop|*)
             # shellcheck disable=SC2086  # intentional word-splitting of flags
             outlaw-session-watchdog desktop electron $ELECTRON_FLAGS /usr/share/outlaw-os
-            ;;
-        tty|*)
-            return 0
             ;;
     esac
 }

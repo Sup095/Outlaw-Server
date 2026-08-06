@@ -1,5 +1,5 @@
 // ============================================================================
-// Outlaw OS - renderer
+// Outlaw Server - renderer
 // No inline handlers (CSP-safe). Everything talks to the main process through
 // the audited `window.outlaw` bridge defined in preload.js.
 // ============================================================================
@@ -10,12 +10,24 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 // F1 — capture renderer errors/rejections into the combined error log, so a
-// desktop crash leaves a trace even when nobody's reading the console.
+// crash leaves a trace even when nobody's reading the console.
+//
+// The reporter must be incapable of reporting itself. A bare try/catch is NOT
+// enough: errorlog.add returns a promise, and a REJECTED one escapes the catch,
+// fires 'unhandledrejection', and calls this handler again — an infinite loop
+// that buries the original fault under thousands of copies of its own failure.
+// So: swallow the rejection too, and never let this path throw.
+function _reportUiFault(message) {
+    try {
+        const p = window.outlaw.errorlog.add({ level: 'error', source: 'shell-ui', message });
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch { /* reporting is best-effort by definition */ }
+}
 window.addEventListener('error', (e) => {
-    try { window.outlaw.errorlog.add({ level: 'error', source: 'shell-ui', message: (e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || '') }); } catch {}
+    _reportUiFault((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''));
 });
 window.addEventListener('unhandledrejection', (e) => {
-    try { window.outlaw.errorlog.add({ level: 'error', source: 'shell-ui', message: 'unhandledrejection: ' + String((e.reason && e.reason.message) || e.reason) }); } catch {}
+    _reportUiFault('unhandledrejection: ' + String((e.reason && e.reason.message) || e.reason));
 });
 
 let statsTimer = null;
@@ -99,197 +111,26 @@ async function onAirplaneToggle(e) {
 }
 try { updateOnlineStatus(); } catch {}
 
-// --- Region & Input (keyboard layout, time zone, NTP) + Bluetooth -----------
+// --- Time zone + NTP ---------------------------------------------------------
+// A server's clock has to be right: logs, TLS certificates, scheduled jobs and
+// the TOTP codes that get you in all depend on it. Keyboard layout went with
+// the desktop.
 function _regionMsg(t) { const el = document.querySelector('#region-msg'); if (el) el.textContent = t || ''; }
 let _regionPopulated = false;
 async function refreshRegionUi() {
-    const kbSel = document.querySelector('#kb-layout');
     const tzSel = document.querySelector('#tz-select');
     const ntp = document.querySelector('#ntp-toggle');
     try {
         if (!_regionPopulated) {
-            const [layouts, zones] = await Promise.all([api.kb.list(), api.time.zones()]);
-            if (kbSel && Array.isArray(layouts)) kbSel.innerHTML = layouts.map((l) => `<option value="${l.code}">${l.label}</option>`).join('');
+            const zones = await api.time.zones();
             if (tzSel && Array.isArray(zones)) tzSel.innerHTML = zones.map((z) => `<option value="${z}">${z}</option>`).join('');
             _regionPopulated = true;
         }
-        const [kbSt, tSt] = await Promise.all([api.kb.status(), api.time.status()]);
-        if (kbSel && kbSt) kbSel.value = kbSt.saved || kbSt.current || 'us';
+        const tSt = await api.time.status();
         if (tzSel && tSt && tSt.timezone) tzSel.value = tSt.timezone;
         if (ntp && tSt) ntp.checked = !!tSt.ntp;
         const sub = document.querySelector('#tz-sub'); if (sub && tSt && tSt.local) sub.textContent = tSt.local;
     } catch { /* leave defaults */ }
-}
-async function refreshBtUi() {
-    const tog = document.querySelector('#bt-toggle');
-    const sub = document.querySelector('#bt-status-sub');
-    const mng = document.querySelector('#bt-manage-btn');
-    try {
-        const r = await api.bt.status();
-        if (!r || !r.present) {
-            if (sub) sub.textContent = 'No Bluetooth adapter found.';
-            if (tog) tog.disabled = true;
-            if (mng) mng.disabled = true;
-            return;
-        }
-        if (tog) { tog.disabled = false; tog.checked = !!r.powered; }
-        if (mng) mng.disabled = false;
-        if (sub) sub.textContent = r.powered ? 'On — pair a device below.' : 'Off.';
-    } catch { if (sub) sub.textContent = 'Bluetooth unavailable.'; }
-}
-
-// --- Tier-2 desktop QOL: night light + Do Not Disturb -----------------------
-function _desktopMsg(t) { const el = document.querySelector('#desktop-msg'); if (el) el.textContent = t || ''; }
-async function refreshDesktopUi() {
-    const nlTog = document.querySelector('#nightlight-toggle');
-    const nlTemp = document.querySelector('#nightlight-temp');
-    const nlRow = document.querySelector('#nightlight-warmth-row');
-    const dndTog = document.querySelector('#dnd-toggle');
-    try {
-        const nl = await api.nightlight.status();
-        if (nlTog) nlTog.checked = !!(nl && nl.on);
-        if (nlTemp && nl && nl.temp) nlTemp.value = String(nl.temp);
-        if (nlRow) nlRow.style.display = (nl && nl.on) ? '' : 'none';
-        const sub = document.querySelector('#nightlight-sub');
-        if (sub && nl && !nl.supported) sub.textContent = 'Runs on Outlaw OS.';
-    } catch {}
-    try {
-        const d = await api.notif.dndStatus();
-        if (dndTog) dndTog.checked = !!(d && d.paused);
-    } catch {}
-}
-
-// --- Display settings (xrandr modes + brightness) ----------------------------
-// The renderer half of the safe-apply design: main owns the real 15s revert
-// timer; this code just renders the pickers and the visible countdown.
-function _dispMsg(t) { const el = document.querySelector('#display-msg'); if (el) el.textContent = t || ''; }
-async function refreshDisplayUi() {
-    const box = document.querySelector('#display-outputs');
-    if (!box) return;
-    try {
-        const d = await api.display.info();
-        if (!d || !d.supported) box.innerHTML = '<div class="muted">Display settings run on Outlaw OS.</div>';
-        else if (!d.outputs.length) box.innerHTML = '<div class="muted">No displays detected.</div>';
-        else {
-            box.innerHTML = '';
-            for (const o of d.outputs) {
-                const row = document.createElement('div');
-                row.className = 'setting';
-                const opts = [];
-                for (const m of o.modes) for (const r of m.rates) {
-                    const sel = o.current && o.current.mode === m.mode && o.current.rate === r;
-                    opts.push(`<option value="${_escapeHtml(m.mode)}|${_escapeHtml(r)}"${sel ? ' selected' : ''}>${_escapeHtml(m.mode)} @ ${_escapeHtml(r)} Hz</option>`);
-                }
-                row.innerHTML =
-                    `<div class="label">${_escapeHtml(o.name)}${o.primary ? ' <span class="dim">(primary)</span>' : ''}`
-                    + `<small>${o.current ? 'Now: ' + _escapeHtml(o.current.mode) + ' @ ' + _escapeHtml(o.current.rate) + ' Hz' : 'Current mode unknown'}</small></div>`
-                    + `<div class="row" style="gap:6px;">`
-                    + `<select data-disp-out="${_escapeHtml(o.name)}" aria-label="Resolution for ${_escapeHtml(o.name)}" style="width:auto;min-width:190px;">${opts.join('')}</select>`
-                    + `<button data-disp-apply="${_escapeHtml(o.name)}" title="Apply this mode (auto-reverts in 15s unless you keep it)">Apply</button></div>`;
-                box.appendChild(row);
-            }
-            enhanceSelects(box);   // fresh selects each render — wrappers die with them
-        }
-    } catch { box.innerHTML = '<div class="muted">Couldn\'t read display info.</div>'; }
-    try {
-        const b = await api.display.brightnessInfo();
-        const row = document.querySelector('#brightness-row');
-        const sl = document.querySelector('#brightness-slider');
-        const sub = document.querySelector('#brightness-sub');
-        if (row) row.hidden = !(b && b.present);
-        if (b && b.present && sl) sl.value = b.pct;
-        if (b && b.present && b.writable === false && sub) {
-            sub.textContent = 'Backlight found, but no permission to change it — fresh-install a current ISO to pick up the udev rule.';
-        }
-    } catch {}
-}
-// Keep/revert countdown dialog (the visible half of main's auto-revert).
-let _dispCountTimer = null;
-let _dispPending = null;
-function _closeDispConfirm() {
-    const m = document.querySelector('#disp-confirm');
-    if (m) m.classList.remove('show');
-    if (_dispCountTimer) { clearInterval(_dispCountTimer); _dispCountTimer = null; }
-    _dispPending = null;
-}
-function openDispConfirm(payload) {
-    const m = document.querySelector('#disp-confirm');
-    if (!m) return;
-    _dispPending = payload || null;
-    let left = 15;
-    const c = document.querySelector('#disp-count');
-    if (c) c.textContent = left;
-    m.classList.add('show');
-    const keep = document.querySelector('#disp-keep');
-    if (keep) keep.focus();
-    _dispCountTimer = setInterval(() => {
-        left--;
-        if (c && left >= 0) c.textContent = left;
-        if (left <= 0) {
-            // Main's timer has already reverted (or is about to) — just reflect it.
-            _closeDispConfirm();
-            _dispMsg('No confirmation — reverted to the previous mode.');
-            refreshDisplayUi();
-        }
-    }, 1000);
-}
-
-// Recent-notifications list (read-only view over the daemon's history).
-async function renderNotifHistory() {
-    const box = document.querySelector('#notif-history');
-    if (!box) return;
-    if (box.style.display !== 'none') { box.style.display = 'none'; return; }  // toggle closed
-    box.style.display = '';
-    box.textContent = 'Loading…';
-    try {
-        const h = await api.notif.history();
-        if (!h || !h.supported) { box.textContent = 'Notification history is available on Outlaw OS (needs the dunst daemon).'; return; }
-        if (!h.items.length) { box.textContent = 'No recent notifications.'; return; }
-        box.innerHTML = h.items.map((n) =>
-            `<div style="padding:4px 0;border-bottom:1px solid var(--line);">`
-            + `<b>${_escapeHtml(n.summary || '(no title)')}</b>`
-            + (n.app ? ` <span class="dim">· ${_escapeHtml(n.app)}</span>` : '')
-            + (n.body ? `<br><span class="dim">${_escapeHtml(n.body)}</span>` : '')
-            + `</div>`).join('');
-    } catch { box.textContent = 'Couldn\'t read the notification history.'; }
-}
-
-// --- QOL batch: quick-settings popover (topbar ☰) ---------------------------
-// The everyday toggles in one place. Every control reuses an EXISTING IPC
-// surface — this popover adds no new privileges, just faster reach.
-function _qkSet(sel, on) {
-    const b = document.querySelector(sel);
-    if (b) { b.classList.toggle('on', !!on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
-}
-function _qkOn(sel) { const b = document.querySelector(sel); return !!(b && b.classList.contains('on')); }
-async function refreshQuickUi() {
-    await Promise.all([
-        api.nightlight.status().then((nl) => _qkSet('#qk-nightlight', !!(nl && nl.on))).catch(() => {}),
-        api.notif.dndStatus().then((d) => _qkSet('#qk-dnd', !!(d && d.paused))).catch(() => {}),
-        api.net.airplaneStatus().then((a) => _qkSet('#qk-airplane', !!(a && a.airplane))).catch(() => {}),
-        api.settings.get().then((s) => _qkSet('#qk-perf', !!(s && s.performanceMode))).catch(() => {}),
-        api.audio.get().then((a) => {
-            const row = document.querySelector('#qk-vol-row');
-            if (row) row.hidden = !(a && a.available);
-            if (a && a.available) {
-                const sl = document.querySelector('#qk-vol'); if (sl) sl.value = a.volume;
-                const pct = document.querySelector('#qk-vol-pct'); if (pct) pct.textContent = a.volume + '%';
-            }
-        }).catch(() => { const row = document.querySelector('#qk-vol-row'); if (row) row.hidden = true; }),
-        api.display.brightnessInfo().then((b) => {
-            const row = document.querySelector('#qk-bright-row');
-            if (row) row.hidden = !(b && b.present && b.writable !== false);
-            if (b && b.present) {
-                const sl = document.querySelector('#qk-bright'); if (sl) sl.value = b.pct;
-                const pct = document.querySelector('#qk-bright-pct'); if (pct) pct.textContent = b.pct + '%';
-            }
-        }).catch(() => { const row = document.querySelector('#qk-bright-row'); if (row) row.hidden = true; }),
-    ]);
-}
-function closeQuickPopover() { const p = document.querySelector('#quick-popover'); if (p) p.hidden = true; }
-function toggleQuickPopover() {
-    const pop = document.querySelector('#quick-popover'); if (!pop) return;
-    if (pop.hidden) { closeCalPopover(); refreshQuickUi(); pop.hidden = false; } else pop.hidden = true;
 }
 
 // --- QOL batch: calendar popover (topbar clock) ------------------------------
@@ -319,7 +160,6 @@ function closeCalPopover() { const p = document.querySelector('#cal-popover'); i
 function toggleCalPopover() {
     const pop = document.querySelector('#cal-popover'); if (!pop) return;
     if (pop.hidden) {
-        closeQuickPopover();
         const now = new Date(); _calYear = now.getFullYear(); _calMonth = now.getMonth();
         renderCal(); pop.hidden = false;
     } else pop.hidden = true;
@@ -353,13 +193,7 @@ function _palBuildStatic() {
         run: () => { showScreen('help'); const hs = document.querySelector('#help-search'); if (hs) hs.value = t.title; try { renderHelp(t.title); } catch {} },
     }));
     const actions = [
-        ['📷 Take a screenshot', 'screenshot capture print screen picture', () => takeScreenshot('full')],
-        ['📷 Screenshot a region', 'screenshot region area select crop', () => takeScreenshot('region')],
-        ['🎥 Start / stop screen recording', 'record screen video capture movie clip', () => toggleRecording()],
         ['🔒 Lock the screen', 'lock secure away pin', () => lockNow()],
-        ['💤 Sleep', 'sleep suspend standby power', () => { api.power.suspend().then((r) => { if (r && r.ok === false) toast('Sleep failed: ' + (r.error || 'try again')); }).catch(() => {}); }],
-        ['🌙 Toggle night light', 'night light blue warm color', async () => { try { const s = await api.nightlight.status(); const r = await api.nightlight.set({ on: !(s && s.on) }); toast(r && r.ok ? ('Night light ' + (r.on ? 'on.' : 'off.')) : ((r && r.error) || 'Couldn\'t change night light.')); } catch {} }],
-        ['🔕 Toggle Do Not Disturb', 'dnd do not disturb notifications quiet mute', async () => { try { const d = await api.notif.dndStatus(); const r = await api.notif.dndSet(!(d && d.paused)); toast(r && r.ok ? ('Do Not Disturb ' + (r.paused ? 'on.' : 'off.')) : ((r && r.error) || 'Couldn\'t change Do Not Disturb.')); } catch {} }],
         ['✦ Ask the AI', 'ai assistant ask chat question', () => { showScreen('ai'); const i = document.querySelector('#ai-in'); if (i) i.focus(); }],
     ];
     actions.forEach(([label, kw, run]) => items.push({ label, kind: 'action', kw, run }));
@@ -426,7 +260,7 @@ function openPalette() {
     if (ls && ls.classList.contains('show')) return;
     const qs = document.querySelector('#quickstart');
     if (qs && qs.style.display === 'flex') return;
-    closeQuickPopover(); closeCalPopover();
+    closeCalPopover();
     pal.hidden = false;
     const inp = document.querySelector('#pal-input');
     if (inp) { inp.value = ''; inp.focus(); }
@@ -521,8 +355,7 @@ function openSignin({ reauth, user, hasPin }) {
     // Close every floating surface and drop focus first — otherwise a still-
     // focused palette input behind the overlay would keep receiving keystrokes
     // (Enter could run actions "through" the lock screen).
-    try { closePalette(); closeQuickPopover(); closeCalPopover(); } catch {}
-    try { const vp = $('#volume-popover'); if (vp) vp.hidden = true; } catch {}
+    try { closePalette(); closeCalPopover(); } catch {}
     try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch {}
     _signinReauth = !!reauth;
     _signinHasPin = !!hasPin;
@@ -654,7 +487,7 @@ async function runBoot() {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const push = (s) => { log.textContent += s + '\n'; log.scrollTop = log.scrollHeight; };
     log.textContent = '';
-    push('INITIALIZING OUTLAW OS…');
+    push('INITIALIZING OUTLAW SERVER…');
 
     // Real boot data (best-effort; empty in preview or if the journal is locked).
     let bootLines = [];
@@ -752,10 +585,9 @@ function showScreen(name) {
     if (name === 'files') { _fsFilter = ''; const ff = $('#fs-filter'); if (ff) ff.value = ''; loadFiles(currentDir || null); }
     if (name === 'tasks') { refreshTasks(); startTasksPoll(); } else { stopTasksPoll(); }
     if (name === 'dashboard') renderRecentApps();
-    if (name === 'gaming') refreshGaming();
     if (name === 'apps') { loadAppsCatalog(); const as = $('#apps-search'); if (as) as.focus(); }
     if (name === 'help') { renderHelp(($('#help-search') || {}).value || ''); const hs = $('#help-search'); if (hs) hs.focus(); }
-    if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshDriversUi(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); refreshBtUi(); refreshDesktopUi(); refreshDisplayUi(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
+    if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
     if (name === 'ai') $('#ai-in').focus();
     if (name === 'terminal') $('#term-in').focus();
     // System Core lifecycle — init when navigating to it, teardown otherwise.
@@ -1255,7 +1087,7 @@ async function loadSysInfo() {
             `${i.hostname}  •  ${i.cpu} (${i.cores} cores)\nRAM ${i.ramUsed}/${i.ramTotal}  •  kernel ${i.kernel}\nGPU ${gpu}${diskLine}`;
         const v = $('#app-version'); if (v) v.textContent = 'v' + (i.appVersion || '?');
     } catch {
-        $('#sysinfo').textContent = 'Preview mode — full telemetry available on Outlaw OS.';
+        $('#sysinfo').textContent = 'Preview mode — full telemetry available on Outlaw Server.';
     }
 }
 
@@ -1305,7 +1137,7 @@ async function installShellUpdate() {
 async function repairShell() {
     const status = $('#repair-status');
     if (!window.confirm(
-        'Reinstall the Outlaw OS system code from the latest release?\n\n' +
+        'Reinstall the Outlaw Server system code from the latest release?\n\n' +
         'This refreshes the shell, the helper tools, the installer and CodeMaker\'s code. ' +
         'Your files, installed apps, accounts and settings are KEPT. The desktop restarts afterwards.')) return;
     status.textContent = 'fetching latest release…';
@@ -1316,7 +1148,7 @@ async function repairShell() {
     const res = await api.updates.installShell({ assetUrl: r.assetUrl, shaUrl: r.shaUrl });
     if (!res || !res.ok) { status.textContent = (res && res.error) || 'Repair failed.'; toast('Repair failed: ' + ((res && res.error) || '').slice(0, 120)); return; }
     status.textContent = '✓ reinstalled — restart the shell to finish.';
-    toast('Outlaw OS reinstalled. Restart the desktop to finish.');
+    toast('Outlaw Server reinstalled. Restart the desktop to finish.');
     refreshRollbackAvailability();
 }
 
@@ -1643,12 +1475,12 @@ function renderHelp(query) {
 
 // ---- Phase 6: first-boot Quickstart tour -----------------------------------
 const QUICKSTART_STEPS = [
-    { ico: '✦', title: 'Welcome to Outlaw OS', body: '<p>A lightweight Linux built for AI-driven game development. This quick tour shows where everything is — you can <b>Skip</b> at any time.</p>' },
+    { ico: '✦', title: 'Welcome to Outlaw Server', body: '<p>A lightweight Linux built for AI-driven game development. This quick tour shows where everything is — you can <b>Skip</b> at any time.</p>' },
     { ico: '▣', title: 'Finding your way', body: '<p>The <b>sidebar</b> on the left switches screens — Dashboard, Files, Task Manager, Apps, AI Assistant and more. The top bar shows live CPU/RAM and the clock.</p>' },
     { ico: '✦', title: 'Private, local AI', body: '<p>Open <b>AI Assistant → Check my PC</b> and Outlaw recommends a model your hardware can run plus the best engine for it — the <b>built-in</b> model (already on), <b>Ollama</b> or <b>LM Studio</b>. It all runs on your machine — no account.</p>' },
     { ico: '📦', title: 'Apps & games', body: '<p>The <b>Apps</b> page installs Steam, Firefox, Godot and more in one click. The <b>On this PC</b> view finds everything you’ve already installed, including AppImages.</p>' },
     { ico: '🛠', title: 'Build games', body: '<p>The <b>Dev session</b> (Outlaw CodeMaker) is an AI agent for making Godot games. Switch to it from <b>Settings → Session</b> or the boot greeter.</p>' },
-    { ico: '❔', title: 'Stuck? Open Help', body: '<p>The <b>Help</b> screen explains every part of the OS and how to fix common problems, with a search box. You can replay this tour from there too. Enjoy Outlaw OS!</p>' },
+    { ico: '❔', title: 'Stuck? Open Help', body: '<p>The <b>Help</b> screen explains every part of the OS and how to fix common problems, with a search box. You can replay this tour from there too. Enjoy Outlaw Server!</p>' },
 ];
 let _qsIndex = 0;
 
@@ -1710,81 +1542,6 @@ async function updateBattery() {
             toast('🔋 Battery low (' + b.percent + '%) — consider plugging in.');
         }
     } catch { el.hidden = true; }
-}
-
-// Round-2 QOL — volume control popover.
-function _setVolIcon(vol, muted) {
-    const btn = $('#stat-volume'); if (!btn) return;
-    btn.textContent = (muted || vol === 0) ? '🔇' : vol < 50 ? '🔉' : '🔊';
-}
-async function refreshVolumeUi() {
-    const btn = $('#stat-volume'); if (!btn) return;
-    try {
-        const a = await api.audio.get();
-        if (!a || !a.available) { btn.hidden = true; return; }
-        btn.hidden = false;
-        _setVolIcon(a.volume, a.muted);
-        const sl = $('#vol-slider'); if (sl) sl.value = a.volume;
-        const pct = $('#vol-pct'); if (pct) pct.textContent = a.volume + '%';
-        const mb = $('#vol-mute'); if (mb) mb.textContent = a.muted ? '🔇' : '🔊';
-    } catch { btn.hidden = true; }
-    // QOL — output device picker (headset / HDMI / speakers). Shown only when
-    // there's actually a choice (>1 sink); simple buttons, no dropdown quirks.
-    try {
-        const s = await api.audio.sinks();
-        const box = $('#vol-sinks');
-        if (box) {
-            if (s && s.ok && Array.isArray(s.sinks) && s.sinks.length > 1) {
-                box.hidden = false;
-                box.innerHTML = '<div class="dim" style="font-size:11px;margin:8px 0 4px;">Output device</div>'
-                    + s.sinks.map((k) =>
-                        `<button class="vol-sink-btn${k.current ? ' on' : ''}" data-sink="${_escapeHtml(k.name)}"`
-                        + ` title="${_escapeHtml(k.label)}" aria-pressed="${k.current}">`
-                        + `${k.current ? '● ' : '○ '}${_escapeHtml(k.label)}</button>`).join('');
-            } else { box.hidden = true; box.innerHTML = ''; }
-        }
-    } catch { const box = $('#vol-sinks'); if (box) { box.hidden = true; } }
-}
-function toggleVolumePopover() {
-    const pop = $('#volume-popover'); if (!pop) return;
-    if (pop.hidden) { refreshVolumeUi(); pop.hidden = false; } else pop.hidden = true;
-}
-
-// Round-2 QOL — screenshots. PrtSc = full (1s delay so menus close, no pre-toast
-// that'd be captured); Shift+PrtSc = drag-select a region. Saved to ~/Pictures.
-async function takeScreenshot(mode) {
-    if (mode === 'region') toast('Drag to select a region…');
-    try {
-        const r = await api.screenshot(mode);
-        if (r && r.ok) toast('📷 Saved to Pictures: ' + (r.path || '').replace(/^.*\//, ''));
-        else toast((r && r.error) || 'Screenshot failed.');
-    } catch (e) { toast('Screenshot failed: ' + e.message); }
-}
-window.takeScreenshot = takeScreenshot;   // so System Core (or the AI) can trigger it
-
-// QOL — screen recording (ffmpeg, video-only, saves to ~/Videos). One at a
-// time; a red ⏺ REC pill in the topbar shows it's live and stops it on click.
-function _setRecPill(on) {
-    const p = document.querySelector('#rec-pill');
-    if (p) p.hidden = !on;
-}
-async function toggleRecording() {
-    try {
-        const st = await api.record.status();
-        if (!st || !st.supported) { toast('Screen recording runs on Outlaw OS.'); return; }
-        if (st.recording) {
-            const r = await api.record.stop();
-            _setRecPill(false);
-            toast(r && r.ok
-                ? '🎥 Saved to Videos: ' + (r.path || '').replace(/^.*\//, '') + (r.sizeMb ? ` (${r.sizeMb} MB)` : '')
-                : ((r && r.error) || 'Couldn\'t stop the recording.'));
-        } else {
-            if (!st.haveFfmpeg) { toast('Screen recording needs ffmpeg — install it from Apps (search "ffmpeg").'); return; }
-            const r = await api.record.start();
-            if (r && r.ok) { _setRecPill(true); toast('⏺ Recording the screen — click the red REC pill to stop.'); }
-            else toast((r && r.error) || 'Couldn\'t start recording.');
-        }
-    } catch (e) { toast('Recording error: ' + ((e && e.message) || e)); }
 }
 
 function startStats() {
@@ -2365,56 +2122,6 @@ async function refreshAiStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// Calculator (safe expression evaluator — no eval)
-// ---------------------------------------------------------------------------
-let calcExpr = '';
-function calcRender() { $('#calc-display').value = calcExpr || '0'; }
-function calcKey(k) {
-    if (k === 'C') { calcExpr = ''; calcRender(); return; }
-    if (k === '=') {
-        try { calcExpr = String(safeEval(calcExpr)); }
-        catch { calcExpr = ''; $('#calc-display').value = 'ERROR'; return; }
-        calcRender(); return;
-    }
-    if ('+-*/.'.includes(k)) {
-        if (!calcExpr && k !== '-') return;            // don't start with an operator (except minus)
-        if (/[+\-*/.]$/.test(calcExpr)) calcExpr = calcExpr.slice(0, -1); // replace trailing operator
-    }
-    calcExpr += k;
-    calcRender();
-}
-function safeEval(expr) {
-    const tokens = (expr.match(/(\d+\.?\d*|\.\d+|[+\-*/()])/g) || []);
-    if (tokens.join('') !== expr.replace(/\s+/g, '')) throw new Error('bad');
-    // Shunting-yard to RPN
-    const out = [], ops = [];
-    const prec = { '+': 1, '-': 1, '*': 2, '/': 2, 'u-': 3 };
-    let prev = null;
-    for (const t of tokens) {
-        if (/^[\d.]/.test(t)) { out.push(parseFloat(t)); }
-        else if (t === '(') { ops.push(t); }
-        else if (t === ')') { while (ops.length && ops[ops.length - 1] !== '(') out.push(ops.pop()); if (!ops.length) throw new Error('paren'); ops.pop(); }
-        else {
-            let op = t;
-            if (t === '-' && (prev === null || prev === '(' || '+-*/'.includes(prev))) op = 'u-';
-            while (ops.length && ops[ops.length - 1] !== '(' && prec[ops[ops.length - 1]] >= prec[op]) out.push(ops.pop());
-            ops.push(op);
-        }
-        prev = t;
-    }
-    while (ops.length) { const o = ops.pop(); if (o === '(') throw new Error('paren'); out.push(o); }
-    const st = [];
-    for (const tk of out) {
-        if (typeof tk === 'number') st.push(tk);
-        else if (tk === 'u-') st.push(-st.pop());
-        else { const b = st.pop(), a = st.pop(); if (a === undefined || b === undefined) throw new Error('expr');
-            st.push(tk === '+' ? a + b : tk === '-' ? a - b : tk === '*' ? a * b : a / b); }
-    }
-    if (st.length !== 1 || !isFinite(st[0])) throw new Error('expr');
-    return Math.round(st[0] * 1e10) / 1e10;
-}
-
-// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 // --- P2: stability reporting -------------------------------------------------
@@ -2548,49 +2255,6 @@ if (api && api.on) api.on('job-progress', (p) => {
     if (typeof p.log === 'string') loadingScreen.log(p.log);
     if (p.done) loadingScreen.done(!!p.ok);
 });
-
-// --- Phase 9: session graphics/driver profiles ------------------------------
-async function refreshDriversUi() {
-    const gpuEl = $('#drv-gpu'), stEl = $('#drv-state');
-    try {
-        const d = await api.drivers.detect();
-        if (gpuEl) gpuEl.textContent = (d && d.ok && d.vendor) ? d.vendor : 'unknown';
-        if (stEl) stEl.textContent = (d && d.gaming_installed) ? 'gaming stack installed' : 'lean';
-    } catch { if (gpuEl) gpuEl.textContent = '—'; }
-    try {
-        const p = await api.drivers.preview();
-        const pv = $('#drv-preview');
-        if (pv && p && p.ok && p.packages && p.packages.length) pv.textContent = p.packages.join(' ');
-    } catch {}
-}
-async function _runDriverAction(kind) {
-    // Gate behind the same re-auth as other important installs (no-op if no PIN).
-    if (typeof requireImportantAuth === 'function' && !(await requireImportantAuth())) return;
-    if (kind === 'apply') {
-        // Long job → the streamed loading screen shows live phases + log.
-        const btn = $('#drv-apply'); if (btn) btn.disabled = true;
-        loadingScreen.open('Installing gaming graphics stack');
-        try {
-            const r = await api.drivers.apply();         // streams to the loading screen
-            loadingScreen.done(!!(r && r.ok));           // belt-and-suspenders if the event was missed
-            toast(r && r.ok ? 'Gaming graphics stack installed.' : 'Install failed — see the log.');
-        } catch (e) { loadingScreen.done(false); toast('Error: ' + e.message); }
-        if (btn) btn.disabled = false;
-        refreshDriversUi();
-        return;
-    }
-    // revert — quick, inline output
-    const out = $('#drv-out'), btn = $('#drv-revert');
-    if (out) out.textContent = 'Switching to the lean profile…';
-    if (btn) btn.disabled = true;
-    try {
-        const r = await api.drivers.revert();
-        if (out) out.textContent = r.ok ? ('Done — switched to lean.\n' + (r.output || '')) : ('Failed: ' + (r.error || 'unknown'));
-        toast(r.ok ? 'Switched to lean profile.' : 'Revert failed.');
-    } catch (e) { if (out) out.textContent = 'Error: ' + e.message; }
-    if (btn) btn.disabled = false;
-    refreshDriversUi();
-}
 
 // Custom dropdowns. Native <select> popups are a separate OS-level window that
 // needs a window manager to stay open; in Outlaw's no-WM session they open and
@@ -2808,7 +2472,6 @@ async function loadSettings() {
     const ollModelInput = $('#ollama-model');
     if (ollModelInput) ollModelInput.value = s.ollamaModel || '';
     // LM Studio handles model selection itself — no dropdown to seed.
-    $('#perf-toggle').checked = !!s.performanceMode;
     $('#update-repo').value = s.updateRepo || '';
     const chanEl = $('#update-channel');
     if (chanEl) chanEl.value = s.updateChannel || 'stable';
@@ -2818,80 +2481,15 @@ async function loadSettings() {
     // first Settings open) so there's zero network cost otherwise.
     _stabilityReports = s.stabilityReports || {};
     refreshStabilityUi();
-    // SC5 — System Core voice toggle. Probe TTS engine availability in
-    // parallel with reading the setting so the sub-text reflects reality
-    // (e.g., "On · piper" vs "On · not installed").
-    const voiceEl = $('#voice-toggle');
-    if (voiceEl) {
-        voiceEl.checked = !!s.coreVoiceEnabled;
-        refreshVoiceSubText(!!s.coreVoiceEnabled);
-    }
-    // SC7 — VRAM saver mode dropdown.
-    const vramEl = $('#vram-mode');
-    if (vramEl) {
-        vramEl.value = s.vramSaverMode || 'auto';
-        refreshVramSubText();
-    }
-    // Tier-2 — seed the power-management selects + night-light warmth (the
-    // idle watch itself lives in main and starts with the app).
+    // Seed the auto-lock select (the idle watch itself lives in main).
     const alSel = $('#autolock-select');
     if (alSel) alSel.value = String(s.autoLockMin || 0);
-    const asSel = $('#autosleep-select');
-    if (asSel) asSel.value = String(s.autoSleepMin || 0);
-    const sbSel = $('#screenblank-select');
-    if (sbSel) sbSel.value = String(s.screenBlankMin == null ? -1 : s.screenBlankMin);
-    const nlTempSel = $('#nightlight-temp');
-    if (nlTempSel && s.nightLightTemp) nlTempSel.value = String(s.nightLightTemp);
-}
-
-async function refreshVramSubText() {
-    const sub = $('#vram-mode-sub');
-    if (!sub || !api.vram) return;
-    try {
-        const st = await api.vram.status();
-        const lines = [];
-        lines.push('Currently: ' + (st.label || st.tier));
-        if (st.available && st.totalMb > 0) {
-            lines.push(st.freeMb + ' / ' + st.totalMb + ' MB free');
-        }
-        sub.textContent = lines.join(' · ');
-    } catch {
-        sub.textContent = 'probe failed';
-    }
-}
-
-async function refreshVoiceSubText(enabledHint) {
-    const sub = $('#voice-sub');
-    if (!sub || !api.tts) return;
-    try {
-        const st = await api.tts.status();
-        const enabled = enabledHint != null ? !!enabledHint : !!st.enabled;
-        if (!st.available) {
-            sub.textContent = enabled
-                ? 'On · ' + (st.note || 'no engine installed')
-                : 'Off · ' + (st.note || 'no engine installed');
-        } else if (enabled) {
-            sub.textContent = 'On · speaking via ' + st.engine;
-        } else {
-            sub.textContent = 'Off · text-only bubble';
-        }
-    } catch {
-        sub.textContent = 'Off · text-only bubble';
-    }
 }
 
 async function setSetting(patch) { try { await api.settings.set(patch); } catch {} }
 
-async function refreshGaming() {
-    try {
-        const g = await api.gaming.status();
-        $('#gaming-status').textContent =
-            `GPU ${g.gpu || 'unknown'}  •  GameMode ${g.gamemode ? 'available' : 'not installed'}  •  MangoHud ${g.mangohud ? 'available' : 'not installed'}`;
-    } catch { $('#gaming-status').textContent = 'GPU info available on Outlaw OS.'; }
-}
-
 // ---------------------------------------------------------------------------
-// Power / hotswap
+// Power
 // ---------------------------------------------------------------------------
 // a11y — remember who opened the power menu so focus can return there on close,
 // and move focus into the menu so keyboard/screen-reader users land on an action
@@ -2906,11 +2504,6 @@ function closePower() {
     $('#power-modal').classList.remove('show');
     try { _powerOpener?.focus(); } catch {}
     _powerOpener = null;
-}
-async function hotswap() {
-    closePower();
-    const r = await api.power.hotswap();
-    toast(r.ok ? 'Opening hotswap…' : (r.error || 'Hotswap unavailable.'));
 }
 
 // ---------------------------------------------------------------------------
@@ -3171,9 +2764,6 @@ function wire() {
             loadFiles(base + '/' + fsChip.dataset.folder);
             return;
         }
-        const calcBtn = e.target.closest('#calc-pad [data-k]');
-        if (calcBtn) { calcKey(calcBtn.dataset.k); return; }
-
         const act = e.target.closest('[data-action]');
         if (!act) return;
         switch (act.dataset.action) {
@@ -3212,7 +2802,6 @@ function wire() {
             case 'repair-shell': repairShell(); break;
             case 'rollback-shell': rollbackShell(); break;
             case 'installer': { const r = await api.installer.launch(); toast(r.ok ? 'Opening installer…' : r.error); break; }
-            case 'hotswap': hotswap(); break;
             case 'power-menu': openPower(); break;
             case 'power-cancel': closePower(); break;
             case 'lock': lockNow(); break;
@@ -3320,60 +2909,6 @@ function wire() {
             : t === 'broken' ? 'Broken mode — barely holding on…'
                 : 'Green Phosphor restored.');
     });
-    $('#perf-toggle').addEventListener('change', async (e) => { await api.gaming.setPerformance(e.target.checked); toast('Performance mode ' + (e.target.checked ? 'ON' : 'OFF')); });
-    // SC7 — Aggressive VRAM saver dropdown. setMode immediately invalidates
-    // the probe cache + fires the tier-changed event, so the System Core
-    // badge updates in the same beat the user picks a new mode.
-    const vramModeEl = $('#vram-mode');
-    if (vramModeEl) {
-        vramModeEl.addEventListener('change', async (e) => {
-            const mode = e.target.value;
-            try {
-                const r = await api.vram.setMode(mode);
-                if (!r.ok) {
-                    toast('VRAM mode change failed: ' + (r.error || 'unknown'));
-                    return;
-                }
-                await refreshVramSubText();
-                if (window.outlawCore && window.outlawCore.refreshVramTier) {
-                    window.outlawCore.refreshVramTier();
-                }
-                toast('VRAM saver: ' + (r.status && r.status.label || mode));
-            } catch (err) {
-                toast('VRAM mode error: ' + err.message);
-            }
-        });
-    }
-
-    // SC5 — System Core voice toggle. Persist the setting, then re-probe TTS
-    // status so the sub-text and the System Core footer both catch up without
-    // requiring a screen revisit.
-    const voiceToggleEl = $('#voice-toggle');
-    if (voiceToggleEl) {
-        voiceToggleEl.addEventListener('change', async (e) => {
-            const on = !!e.target.checked;
-            await setSetting({ coreVoiceEnabled: on });
-            refreshVoiceSubText(on);
-            // Force re-probe the engine in case the user just installed one
-            // (caches were valid for up to 30s otherwise).
-            try { await api.tts.status({ force: true }); } catch {}
-            if (window.outlawCore && window.outlawCore.refreshVoiceStatus) {
-                window.outlawCore.refreshVoiceStatus();
-            }
-            // Friendly nudge if they toggled on but no engine is installed.
-            try {
-                const st = await api.tts.status();
-                if (on && !st.available) {
-                    toast('Voice toggle on, but no TTS engine installed (piper / espeak-ng).');
-                } else if (on) {
-                    toast('Core voice on — speaking via ' + st.engine + '.');
-                } else {
-                    toast('Core voice off.');
-                }
-            } catch {}
-        });
-    }
-
     $('#ai-toggle').addEventListener('change', async (e) => {
         if (e.target.checked) {
             const r = await api.ai.enable();
@@ -3575,30 +3110,11 @@ function wire() {
     if (qsReplay) qsReplay.addEventListener('click', showQuickstart);
 
     // Phase 9: session graphics/driver profile buttons.
-    const drvApplyBtn = $('#drv-apply');
-    if (drvApplyBtn) drvApplyBtn.addEventListener('click', () => _runDriverAction('apply'));
-    const drvRevertBtn = $('#drv-revert');
-    if (drvRevertBtn) drvRevertBtn.addEventListener('click', () => _runDriverAction('revert'));
 
     // Phase 12: loading screen close button (enabled once a job finishes).
     const lsClose = $('#ls-close');
     if (lsClose) lsClose.addEventListener('click', () => loadingScreen.hide());
 
-    // Session preference reset — flips ~/.outlaw-session-pref back to "ask"
-    // so the greeter shows again on next boot.
-    const sessResetBtn = $('#session-reset-pref');
-    if (sessResetBtn) {
-        sessResetBtn.addEventListener('click', async () => {
-            try {
-                const r = await api.session.resetGreeterPref();
-                toast(r.ok ? 'Greeter will show on next boot.' : ('Reset failed: ' + (r.error || 'unknown')));
-            } catch (err) {
-                toast('Reset failed: ' + err.message);
-            }
-        });
-    }
-
-    // Session switcher: jump straight from the desktop into a Dev session.
     // Live-ISO welcome card buttons. The card itself is shown/hidden by
     // refreshLiveWelcome() on boot; these handlers cover the three actions
     // the user can take from it.
@@ -3631,65 +3147,6 @@ function wire() {
         });
     }
 
-    const sessSwitchBtn = $('#session-switch-dev');
-    if (sessSwitchBtn) {
-        sessSwitchBtn.addEventListener('click', async () => {
-            // Live demo: the Dev session needs the fully-installed system. Don't
-            // offer to download a dev env into the ephemeral live overlay — just
-            // tell the user to install first.
-            if (_isLive) {
-                window.alert(
-                    "The Dev session isn't available in the live demo.\n\n" +
-                    "Outlaw CodeMaker needs the full system. Install Outlaw OS to your " +
-                    "disk first (click “Install Outlaw OS” on the desktop), then come " +
-                    "back and switch to the Dev session.\n\n" +
-                    "The live environment is a limited preview — install to unlock everything.",
-                );
-                return;
-            }
-            sessSwitchBtn.disabled = true;
-            // First check the Dev session can actually run here. On a freshly
-            // installed system where the dev env didn't build, CodeMaker's Python
-            // deps may be missing — switching would just bounce back to the
-            // desktop. Offer to download + build them instead of failing.
-            let ready = true;
-            try { const s = await api.session.devStatus(); ready = !!(s && s.ready); } catch { ready = true; }
-            if (!ready) {
-                const setup = window.confirm(
-                    "The Dev session isn't set up on this machine yet.\n\n" +
-                    "Outlaw CodeMaker needs Python and its dependencies (PyQt6, etc.). " +
-                    "Download and build them now? This opens a terminal and needs an " +
-                    "internet connection — a few minutes. When it finishes, click " +
-                    "'Switch to Dev session' again.",
-                );
-                if (setup) {
-                    try { await api.session.setupDev(); toast('Setting up the Dev session in a terminal — switch again once it finishes.'); }
-                    catch (err) { toast('Could not start setup: ' + err.message); }
-                }
-                sessSwitchBtn.disabled = false;
-                return;
-            }
-            const ok = window.confirm(
-                'Switch to the Dev session now?\n\n' +
-                'This closes the desktop and opens Outlaw CodeMaker. ' +
-                'The screen will go black for a few seconds while X restarts.',
-            );
-            if (!ok) { sessSwitchBtn.disabled = false; return; }
-            toast('Switching to Dev session…');
-            try {
-                const r = await api.session.switchToDev();
-                if (!r.ok) {
-                    toast('Could not switch: ' + (r.error || 'unknown error'));
-                    sessSwitchBtn.disabled = false;
-                }
-                // On success the main process closes the window — nothing more to do.
-            } catch (err) {
-                toast('Switch failed: ' + err.message);
-                sessSwitchBtn.disabled = false;
-            }
-        });
-    }
-
     // Updater settings — persist on change.
     let repoSaveTimer = null;
     $('#update-repo').addEventListener('input', (e) => {
@@ -3707,12 +3164,8 @@ function wire() {
     const airTog = $('#airplane-toggle');
     if (airTog) airTog.addEventListener('change', onAirplaneToggle);
     refreshAirplane();
-    // Tier-1 — Region & Input (keyboard layout, time zone, NTP).
-    const kbSel = $('#kb-layout');
-    if (kbSel) kbSel.addEventListener('change', async () => {
-        const r = await api.kb.set(kbSel.value);
-        _regionMsg(r && r.ok ? 'Keyboard layout applied.' : ('Couldn\'t set layout' + (r && r.error ? ': ' + r.error : '.')));
-    });
+    // Time zone + NTP. Keeping a server's clock right is not cosmetic: logs,
+    // certificates, scheduled jobs and TOTP sign-in codes all depend on it.
     const tzSel = $('#tz-select');
     if (tzSel) tzSel.addEventListener('change', async () => {
         _regionMsg('Setting time zone…');
@@ -3726,190 +3179,16 @@ function wire() {
         if (!r || !r.ok) { ntpTog.checked = !ntpTog.checked; _regionMsg('Couldn\'t change auto-time' + (r && r.error ? ': ' + r.error : '.')); }
         else _regionMsg('Auto-time ' + (ntpTog.checked ? 'on.' : 'off.'));
     });
-    // Tier-1 — Bluetooth (power toggle + open the pairing manager).
-    const btTog = $('#bt-toggle');
-    if (btTog) btTog.addEventListener('change', async () => {
-        btTog.disabled = true;
-        try { await api.bt.power(btTog.checked); } catch {}
-        btTog.disabled = false; refreshBtUi();
-    });
-    const btMng = $('#bt-manage-btn');
-    if (btMng) btMng.addEventListener('click', async () => {
-        const r = await api.bt.manage();
-        if (!r || !r.ok) toast(r && r.error ? r.error : 'Couldn\'t open the Bluetooth manager.');
-        else toast('Opening the Bluetooth manager…');
-    });
-    // Tier-2 — Night light (warm the screen) + warmth level.
-    const nlTog = $('#nightlight-toggle');
-    const nlTemp = $('#nightlight-temp');
-    const nlRow = $('#nightlight-warmth-row');
-    const applyNl = async (on) => {
-        const temp = nlTemp ? parseInt(nlTemp.value, 10) || 4000 : 4000;
-        const r = await api.nightlight.set({ on, temp });
-        if (nlRow) nlRow.style.display = on ? '' : 'none';
-        if (!r || !r.ok) {
-            if (nlTog) nlTog.checked = false;
-            if (nlRow) nlRow.style.display = 'none';
-            _desktopMsg(r && r.error ? r.error : 'Couldn\'t change night light.');
-        } else {
-            _desktopMsg(on ? 'Night light on.' : 'Night light off.');
-        }
-    };
-    if (nlTog) nlTog.addEventListener('change', () => applyNl(nlTog.checked));
-    if (nlTemp) nlTemp.addEventListener('change', () => { if (nlTog && nlTog.checked) applyNl(true); });
-    // Tier-2 — Do Not Disturb + re-show the last notification.
-    const dndTog = $('#dnd-toggle');
-    if (dndTog) dndTog.addEventListener('change', async () => {
-        const r = await api.notif.dndSet(dndTog.checked);
-        if (!r || !r.ok) { dndTog.checked = !dndTog.checked; _desktopMsg(r && r.error ? r.error : 'Couldn\'t change Do Not Disturb.'); }
-        else _desktopMsg(dndTog.checked ? 'Do Not Disturb on.' : 'Do Not Disturb off.');
-    });
-    const dndLast = $('#dnd-show-last');
-    if (dndLast) dndLast.addEventListener('click', async () => { try { await api.notif.showLast(); } catch {} });
-    const nhBtn = $('#notif-history-btn');
-    if (nhBtn) nhBtn.addEventListener('click', renderNotifHistory);
-    // Display settings — apply (delegated), keep/revert, reset, brightness.
-    { const dbox = $('#display-outputs'); if (dbox) dbox.addEventListener('click', async (e) => {
-        const btn = e.target.closest('[data-disp-apply]'); if (!btn) return;
-        const name = btn.dataset.dispApply;
-        const sel = dbox.querySelector(`select[data-disp-out="${CSS.escape(name)}"]`);
-        if (!sel || !sel.value) return;
-        const [mode, rate] = sel.value.split('|');
-        btn.disabled = true;
-        try {
-            const r = await api.display.setMode({ output: name, mode, rate });
-            if (!r || !r.ok) _dispMsg((r && r.error) || 'Couldn\'t apply that mode.');
-            else openDispConfirm({ output: name, mode, rate });
-        } catch (err) { _dispMsg('Error: ' + ((err && err.message) || err)); }
-        btn.disabled = false;
-    }); }
-    { const k = $('#disp-keep'); if (k) k.addEventListener('click', async () => {
-        try { await api.display.confirmMode(_dispPending || {}); } catch {}
-        _closeDispConfirm(); _dispMsg('Display settings kept — they\'ll be restored on every boot.');
-        refreshDisplayUi();
-    }); }
-    { const rv = $('#disp-revert'); if (rv) rv.addEventListener('click', async () => {
-        try { await api.display.revertMode(); } catch {}
-        _closeDispConfirm(); _dispMsg('Reverted to the previous mode.');
-        refreshDisplayUi();
-    }); }
-    { const dr = $('#display-reset'); if (dr) dr.addEventListener('click', async () => {
-        dr.disabled = true;
-        try {
-            const r = await api.display.resetAuto();
-            _dispMsg(r && r.ok ? 'Every display is back on its native mode.' : ((r && r.error) || 'Reset failed.'));
-        } catch {}
-        dr.disabled = false;
-        refreshDisplayUi();
-    }); }
-    { const bs = $('#brightness-slider'); if (bs) bs.addEventListener('input', async (e) => {
-        try {
-            const r = await api.display.setBrightness(parseInt(e.target.value, 10));
-            if (r && !r.ok && r.error) _dispMsg(r.error);
-        } catch {}
-    }); }
-    { const sl = $('#qk-bright'); if (sl) sl.addEventListener('input', async (e) => {
-        const v = parseInt(e.target.value, 10) || 5;
-        const pct = $('#qk-bright-pct'); if (pct) pct.textContent = v + '%';
-        try { await api.display.setBrightness(v); } catch {}
-    }); }
-    // Tier-2 — power management. Persisting the setting is enough: main's
-    // settings:set hook re-syncs the idle watch / X blanking immediately.
+    // Auto-lock still applies — an unattended console next to a rack is a real
+    // way in. Sleep and screen blanking do not: a server that suspends itself
+    // is a server that stopped serving.
     const alSel = $('#autolock-select');
     if (alSel) alSel.addEventListener('change', () => setSetting({ autoLockMin: parseInt(alSel.value, 10) || 0 }));
-    const asSel = $('#autosleep-select');
-    if (asSel) asSel.addEventListener('change', () => setSetting({ autoSleepMin: parseInt(asSel.value, 10) || 0 }));
-    const sbSel = $('#screenblank-select');
-    if (sbSel) sbSel.addEventListener('change', () => {
-        const v = parseInt(sbSel.value, 10);
-        setSetting({ screenBlankMin: Number.isFinite(v) ? v : -1 });
-    });
     // Main's system-wide idle watch says it's time to lock.
     api.on('idle-lock', onIdleLock);
     // QoL — Settings search/filter.
     const setSearch = $('#settings-search');
     if (setSearch) setSearch.addEventListener('input', (e) => filterSettings(e.target.value));
-    // Round-2 QOL — volume popover.
-    { const sv = $('#stat-volume'); if (sv) sv.addEventListener('click', toggleVolumePopover); }
-    { const sl = $('#vol-slider'); if (sl) sl.addEventListener('input', async (e) => {
-        const v = parseInt(e.target.value, 10) || 0;
-        const pct = $('#vol-pct'); if (pct) pct.textContent = v + '%';
-        _setVolIcon(v, false);
-        try { await api.audio.set(v); } catch {}
-    }); }
-    { const mb = $('#vol-mute'); if (mb) mb.addEventListener('click', async () => { try { await api.audio.toggleMute(); } catch {} refreshVolumeUi(); }); }
-    // QOL — output-device buttons in the volume popover (delegated once).
-    { const vs = $('#vol-sinks'); if (vs) vs.addEventListener('click', async (e) => {
-        const b = e.target.closest('[data-sink]'); if (!b) return;
-        b.disabled = true;
-        try {
-            const r = await api.audio.setSink(b.dataset.sink);
-            if (!r || !r.ok) toast((r && r.error) || 'Couldn\'t switch the output device.');
-        } catch {}
-        refreshVolumeUi();
-    }); }
-    // QOL — screen recording: quick-settings button + the topbar REC pill.
-    { const b = $('#qk-record'); if (b) b.addEventListener('click', () => { closeQuickPopover(); toggleRecording(); }); }
-    { const p = $('#rec-pill'); if (p) p.addEventListener('click', toggleRecording); }
-    document.addEventListener('click', (e) => {
-        const pop = $('#volume-popover');
-        if (!pop || pop.hidden) return;
-        if (e.target.closest('#volume-popover') || e.target.closest('#stat-volume')) return;
-        pop.hidden = true;
-    });
-    // QOL batch — quick-settings popover (topbar ☰).
-    { const qt = $('#quick-toggle'); if (qt) qt.addEventListener('click', toggleQuickPopover); }
-    const _qkToggle = (sel, doSet) => {
-        const b = $(sel);
-        if (!b) return;
-        b.addEventListener('click', async () => {
-            const next = !_qkOn(sel);
-            b.disabled = true;
-            try { await doSet(next); } catch {}
-            b.disabled = false;
-        });
-    };
-    _qkToggle('#qk-nightlight', async (on) => {
-        const r = await api.nightlight.set({ on });
-        if (r && r.ok) { _qkSet('#qk-nightlight', on); refreshDesktopUi(); }
-        else toast((r && r.error) || 'Couldn\'t change night light.');
-    });
-    _qkToggle('#qk-dnd', async (on) => {
-        const r = await api.notif.dndSet(on);
-        if (r && r.ok) { _qkSet('#qk-dnd', on); refreshDesktopUi(); }
-        else toast((r && r.error) || 'Couldn\'t change Do Not Disturb.');
-    });
-    _qkToggle('#qk-airplane', async (on) => {
-        const r = await api.net.setAirplane(on);
-        if (r && r.ok) _qkSet('#qk-airplane', on);
-        else toast('Couldn\'t change airplane mode' + (r && r.error ? ': ' + r.error.slice(0, 80) : '.'));
-        refreshAirplane();   // keep the Settings toggle + offline pill in sync either way
-    });
-    _qkToggle('#qk-perf', async (on) => {
-        await api.gaming.setPerformance(on);
-        _qkSet('#qk-perf', on);
-        const pt = $('#perf-toggle'); if (pt) pt.checked = on;
-        toast('Performance mode ' + (on ? 'ON' : 'OFF'));
-    });
-    { const sl = $('#qk-vol'); if (sl) sl.addEventListener('input', async (e) => {
-        const v = parseInt(e.target.value, 10) || 0;
-        const pct = $('#qk-vol-pct'); if (pct) pct.textContent = v + '%';
-        _setVolIcon(v, false);
-        try { await api.audio.set(v); } catch {}
-    }); }
-    { const b = $('#qk-screenshot'); if (b) b.addEventListener('click', () => { closeQuickPopover(); takeScreenshot('full'); }); }
-    { const b = $('#qk-lock'); if (b) b.addEventListener('click', () => { closeQuickPopover(); lockNow(); }); }
-    { const b = $('#qk-sleep'); if (b) b.addEventListener('click', () => {
-        closeQuickPopover();
-        api.power.suspend().then((r) => { if (r && r.ok === false) toast('Sleep failed: ' + (r.error || 'try again')); }).catch(() => {});
-    }); }
-    { const b = $('#qk-settings'); if (b) b.addEventListener('click', () => { closeQuickPopover(); showScreen('settings'); }); }
-    document.addEventListener('click', (e) => {
-        const pop = $('#quick-popover');
-        if (!pop || pop.hidden) return;
-        if (e.target.closest('#quick-popover') || e.target.closest('#quick-toggle')) return;
-        closeQuickPopover();
-    });
     // QOL batch — calendar popover (topbar clock).
     { const ck = $('#stat-clock'); if (ck) ck.addEventListener('click', toggleCalPopover); }
     { const b = $('#cal-prev'); if (b) b.addEventListener('click', () => { _calMonth--; if (_calMonth < 0) { _calMonth = 11; _calYear--; } renderCal(); }); }
@@ -3945,16 +3224,8 @@ function wire() {
             // registration), so after consuming the key it must stop the later
             // document-level listener — that one would see the surface already
             // closed and close the power menu / cancel a confirm dialog too.
-            // Display keep/revert dialog first: Esc = revert (the safe choice).
-            const dc = $('#disp-confirm');
-            if (dc && dc.classList.contains('show')) {
-                const rv = $('#disp-revert'); if (rv) rv.click();
-                e.stopImmediatePropagation(); return;
-            }
             const pal = $('#palette'); if (pal && !pal.hidden) { closePalette(); e.stopImmediatePropagation(); return; }
-            const qp = $('#quick-popover'); if (qp && !qp.hidden) { closeQuickPopover(); e.stopImmediatePropagation(); return; }
             const cp = $('#cal-popover'); if (cp && !cp.hidden) { closeCalPopover(); e.stopImmediatePropagation(); return; }
-            const vp = $('#volume-popover'); if (vp && !vp.hidden) { vp.hidden = true; e.stopImmediatePropagation(); return; }
             const ls = $('#loadscreen'), lsClose = $('#ls-close');
             if (ls && ls.classList.contains('show') && lsClose && !lsClose.disabled) { loadingScreen.hide(); e.stopImmediatePropagation(); return; }
             // Esc leaves the quickstart tour (same as Skip — it can be replayed
@@ -3968,8 +3239,6 @@ function wire() {
         // Don't fire navigation shortcuts while the sign-in/lock overlay is up.
         const signin = $('#signin');
         if (signin && signin.style.display === 'flex') return;
-        // Round-2 QOL — PrtSc = full screenshot, Shift+PrtSc = drag-select a region.
-        if (e.key === 'PrintScreen') { e.preventDefault(); takeScreenshot(e.shiftKey ? 'region' : 'full'); return; }
         // Ctrl/Cmd+K — quick-ask the AI from anywhere.
         if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
             e.preventDefault();
@@ -4034,24 +3303,12 @@ function wire() {
         // One Esc dismisses ONE surface. This listener registered first, so it
         // must defer while a palette/popover/loading screen is open — the later
         // Esc-chain listener owns closing those; without this guard the same
-        // keypress would ALSO close the power menu, cancel a pending confirm
-        // dialog, and wipe the calculator behind them.
-        const _escSurfaceOpen = ['#palette', '#quick-popover', '#cal-popover', '#volume-popover']
+        // keypress would ALSO close the power menu and cancel a pending confirm
+        // dialog behind them.
+        const _escSurfaceOpen = ['#palette', '#cal-popover']
             .some((s) => { const el = $(s); return el && !el.hidden; })
-            || (($('#loadscreen') || {}).classList || { contains: () => false }).contains('show')
-            || (($('#disp-confirm') || {}).classList || { contains: () => false }).contains('show');
+            || (($('#loadscreen') || {}).classList || { contains: () => false }).contains('show');
         if (e.key === 'Escape' && !_escSurfaceOpen) { closePower(); if (confirmResolver) closeConfirm(false); }
-        if ($('#screen-calc').classList.contains('active') && $('#app').classList.contains('ready')) {
-            // Don't drive the calculator while the user is typing in a text
-            // field (e.g. the command palette opened over the Calculator screen)
-            // or dismissing an overlay with Esc.
-            const ae = document.activeElement;
-            if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
-            if (_escSurfaceOpen && e.key === 'Escape') return;
-            if (/[0-9.+\-*/]/.test(e.key)) calcKey(e.key);
-            else if (e.key === 'Enter' || e.key === '=') calcKey('=');
-            else if (e.key === 'Escape' || e.key.toLowerCase() === 'c') calcKey('C');
-        }
     });
 }
 
@@ -4107,9 +3364,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     refreshNetStatus().catch(() => {});
     checkVersionBump().catch(() => {});   // QoL — "Updated to vX" note after an update
     checkDiskSpace().catch(() => {});     // QoL — warn if the disk is nearly full
-    refreshVolumeUi().catch(() => {});    // QoL — show the volume control if audio is present
     wireAuth();
-    calcRender();
     // Sign-in gate (Phase 3c): the lock screen first (if enabled), then boot.
     startupGate();
 });
@@ -4137,11 +3392,4 @@ function applyLiveLocks() {
     if (!_isLive) return;
     document.body.classList.add('live-mode');
     const badge = $('#live-badge'); if (badge) badge.hidden = false;
-    const reason = 'Locked in the live demo — install Outlaw OS to unlock this.';
-    // Controls that don't make sense on a throwaway live system.
-    ['#perf-toggle', '#qk-perf'].forEach((sel) => {
-        const el = $(sel); if (el) { el.disabled = true; el.title = reason; }
-    });
-    const dev = $('#session-switch-dev');
-    if (dev) dev.title = 'Install Outlaw OS first to use the Dev session.';
 }

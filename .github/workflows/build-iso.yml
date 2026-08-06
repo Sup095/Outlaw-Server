@@ -26,7 +26,10 @@ jobs:
   preflight:
     name: Validate package names
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15 was too tight: a slow mirror day plus the container pull ran the job
+    # straight into the limit and it was cancelled mid-query. The step itself is
+    # much faster now (one batched query, -Sy not -Syu); this is just headroom.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
         with:

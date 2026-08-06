@@ -1,5 +1,5 @@
 // ============================================================================
-// Outlaw OS - Electron main process (secure)
+// Outlaw Server - Electron main process (secure)
 // ----------------------------------------------------------------------------
 // Hardened for a security/gaming desktop:
 //   * contextIsolation ON, nodeIntegration OFF, sandboxed renderer
@@ -130,7 +130,10 @@ const DEFAULT_SETTINGS = {
     // it costs nothing at runtime and can be flipped anytime in Settings.
     theme: 'green',
     performanceMode: false,  // gaming CPU governor / gamemode hint
-    updateRepo: 'Sup095/Outlaw-Game-OS',  // "owner/repo" the self-updater checks for releases (overridable in Settings)
+    // "owner/repo" the self-updater checks for releases (overridable in Settings).
+    // This MUST be the server repo: pointing it at the desktop OS would pull
+    // game-OS releases down onto a server.
+    updateRepo: 'Sup095/Outlaw-Server',
     updateChannel: 'stable', // 'stable' = latest non-prerelease; 'beta' = newest release of any kind
     autoCheck: true,         // background check for shell updates
     lastUpdateCheck: 0,
@@ -622,7 +625,7 @@ function classifyCommand(command) {
 function runShell(command, { timeout = 30000 } = {}) {
     return new Promise((resolve) => {
         if (!IS_LINUX) {
-            return resolve({ code: 127, stdout: '', stderr: 'Shell commands only run on Outlaw OS (Linux).' });
+            return resolve({ code: 127, stdout: '', stderr: 'Shell commands only run on Outlaw Server (Linux).' });
         }
         const child = spawn('bash', ['-c', command], {
             cwd: os.homedir(),
@@ -1178,7 +1181,7 @@ async function executeIntent(intent) {
                 case 'report_problem':
                     return { did: 'system_action', openReport: true, text: intent.text || 'Opening the problem reporter — collect the log and send it.' };
                 case 'check_updates': {
-                    // Read-only: check GitHub for a newer Outlaw OS shell release + report.
+                    // Read-only: check GitHub for a newer Outlaw Server shell release + report.
                     try {
                         const info = await updater.checkShellUpdate({
                             repo: settings.updateRepo,
@@ -1493,7 +1496,7 @@ function _backlightDir() {
     } catch { return null; }
 }
 function applyBrightnessPct(pct) {
-    if (!IS_LINUX) return { ok: false, error: 'Brightness runs on Outlaw OS.' };
+    if (!IS_LINUX) return { ok: false, error: 'Brightness runs on Outlaw Server.' };
     const dir = _backlightDir();
     if (!dir) return { ok: false, error: 'No controllable backlight on this machine.' };
     // Floor 5% — the slider can dim, never black the screen entirely.
@@ -1638,7 +1641,7 @@ function registerIpc() {
         return { ok: true, powered: !!on };
     });
     ipcMain.handle('bt:manage', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Bluetooth manager runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Bluetooth manager runs on Outlaw Server.' };
         // Confirm the manager is actually installed before claiming success, then
         // make sure the adapter is unblocked and open the pairing GUI (blueman).
         const have = await runShell('command -v blueman-manager >/dev/null 2>&1 && echo yes', { timeout: 3000 });
@@ -1656,7 +1659,7 @@ function registerIpc() {
         return { supported: true, outputs, pending: !!_dispRevert };
     });
     ipcMain.handle('display:set-mode', async (_e, payload) => {
-        if (!IS_LINUX) return { ok: false, error: 'Display settings run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Display settings run on Outlaw Server.' };
         if (_dispRevert) return { ok: false, error: 'Confirm or revert the pending change first.' };
         const output = String((payload && payload.output) || '');
         const mode = String((payload && payload.mode) || '');
@@ -1703,7 +1706,7 @@ function registerIpc() {
         return { ok: true };
     });
     ipcMain.handle('display:reset-auto', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Display settings run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Display settings run on Outlaw Server.' };
         if (_dispRevert) _dispDoRevert();
         // Back to every output's preferred mode — the always-safe baseline —
         // and stop re-applying saved modes at boot.
@@ -1838,7 +1841,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('system:gpu', async () => {
-        if (!IS_LINUX) return 'GPU detection runs on Outlaw OS.';
+        if (!IS_LINUX) return 'GPU detection runs on Outlaw Server.';
         const r = await runShell("lspci 2>/dev/null | grep -Ei 'vga|3d|display' | sed 's/^.*: //' | head -n 2");
         return r.stdout || 'No discrete GPU detected.';
     });
@@ -1850,7 +1853,7 @@ function registerIpc() {
     ipcMain.handle('system:gpu-detailed', async () => {
         if (!IS_LINUX) {
             return { available: false, name: '', vramUsedMb: 0, vramTotalMb: 0,
-                     vramPct: 0, source: 'preview', note: 'GPU probe runs on Outlaw OS.' };
+                     vramPct: 0, source: 'preview', note: 'GPU probe runs on Outlaw Server.' };
         }
         // Prefer nvidia-smi for VRAM numbers; this is the only practical way
         // to read actual used VRAM from a shell call. CSV no-units keeps the
@@ -2047,7 +2050,7 @@ function registerIpc() {
     // mode 'region' = interactive drag-select; otherwise full screen with a 1s
     // delay so any open menu/popover can close. Saves to ~/Pictures.
     ipcMain.handle('screenshot:capture', async (_e, mode) => {
-        if (!IS_LINUX) return { ok: false, error: 'Screenshots run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Screenshots run on Outlaw Server.' };
         const has = await runShell('command -v scrot >/dev/null 2>&1 && echo yes');
         if (!/yes/.test(has.stdout || '')) return { ok: false, error: 'Screenshot tool (scrot) not available.' };
         const dir = path.join(os.homedir(), 'Pictures');
@@ -2075,7 +2078,7 @@ function registerIpc() {
         return { supported: true, haveFfmpeg: /yes/.test(have.stdout || ''), recording: !!recProc, path: recPath };
     });
     ipcMain.handle('record:start', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Screen recording runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Screen recording runs on Outlaw Server.' };
         if (recProc) return { ok: false, error: 'Already recording — stop the current recording first.' };
         const have = await runShell('command -v ffmpeg >/dev/null 2>&1 && echo yes', { timeout: 3000 });
         if (!/yes/.test(have.stdout || '')) {
@@ -2285,7 +2288,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('scheduled:enable', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw Server.' };
         const entry = SCHEDULED_PROFILES[id];
         if (!entry) return { ok: false, error: 'Unknown schedule id.' };
         // --now also kicks off the timer immediately so it starts counting
@@ -2299,7 +2302,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('scheduled:disable', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw Server.' };
         const entry = SCHEDULED_PROFILES[id];
         if (!entry) return { ok: false, error: 'Unknown schedule id.' };
         const r = await runShell(
@@ -2311,7 +2314,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('scheduled:run-now', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw Server.' };
         const entry = SCHEDULED_PROFILES[id];
         if (!entry) return { ok: false, error: 'Unknown schedule id.' };
         // start the instance directly so it runs whether the timer is enabled
@@ -2368,7 +2371,7 @@ function registerIpc() {
         return { airplane: /disabled/i.test(r.stdout || '') };
     });
     ipcMain.handle('net:airplane-set', async (_e, on) => {
-        if (!IS_LINUX) return { ok: false, error: 'Airplane mode runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Airplane mode runs on Outlaw Server.' };
         const enable = !!on;
         const r = await runShell(`nmcli radio all ${enable ? 'off' : 'on'} 2>/dev/null`, { timeout: 8000 });
         await runShell(`rfkill ${enable ? 'block' : 'unblock'} bluetooth 2>/dev/null`, { timeout: 5000 });
@@ -2380,7 +2383,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('net:wifi-list', async () => {
-        if (!IS_LINUX) return { ok: false, networks: [], error: 'Wi-Fi scan runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, networks: [], error: 'Wi-Fi scan runs on Outlaw Server.' };
         await runShell('nmcli radio wifi on 2>/dev/null', { timeout: 5000 });
         // --rescan yes forces a fresh scan; can take a few seconds.
         const r = await runShell("nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan yes 2>/dev/null", { timeout: 30000 });
@@ -2414,7 +2417,7 @@ function registerIpc() {
     // match an EXISTING saved profile, and both calls use execFile argv — an
     // SSID with spaces/quotes can't inject anything.
     ipcMain.handle('net:wifi-forget', async (_e, ssid) => {
-        if (!IS_LINUX) return { ok: false, error: 'Wi-Fi runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Wi-Fi runs on Outlaw Server.' };
         const name = String(ssid || '');
         if (!name || name.length > 64) return { ok: false, error: 'Bad network name.' };
         const list = await new Promise((resolve) => {
@@ -2432,7 +2435,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('net:wifi-connect', async (_e, payload) => {
-        if (!IS_LINUX) return { ok: false, error: 'Wi-Fi runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Wi-Fi runs on Outlaw Server.' };
         const ssid = String((payload && payload.ssid) || '');
         const password = String((payload && payload.password) || '');
         if (!ssid || ssid.length > 64) return { ok: false, error: 'Bad network name.' };
@@ -2504,7 +2507,7 @@ function registerIpc() {
     // viewer; opening a file with shell.openPath needs a registered handler,
     // which a fresh system lacks — Thunar gives full interaction either way.
     ipcMain.handle('files:open-manager', async (_e, dir) => {
-        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
         const target = (dir && typeof dir === 'string') ? dir : os.homedir();
         const bin = await resolveBinary(APP_REGISTRY.files);
         if (bin) {
@@ -2575,7 +2578,7 @@ function registerIpc() {
     // validated (must start alphanumeric, safe charset) and each term single-quoted
     // so it can never be a shell injection or a stray pacman flag.
     ipcMain.handle('apps:search', async (_e, query) => {
-        if (!IS_LINUX) return { ok: false, error: 'Search runs on Outlaw OS.', results: [] };
+        if (!IS_LINUX) return { ok: false, error: 'Search runs on Outlaw Server.', results: [] };
         const q = String(query || '').trim();
         if (q.length < 2) return { ok: true, results: [] };
         if (!/^[a-z0-9][a-z0-9 ._+-]{0,39}$/i.test(q)) {
@@ -2604,7 +2607,7 @@ function registerIpc() {
     // behind the search results above). Name is strictly validated, then verified
     // to be a real repo package before we hand it to the privileged installer.
     ipcMain.handle('apps:install-pkg', async (_e, pkg) => {
-        if (!IS_LINUX) return { ok: false, error: 'Install runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Install runs on Outlaw Server.' };
         const name = String(pkg || '').trim();
         if (!/^[a-z0-9][a-z0-9@._+-]{0,79}$/i.test(name)) return { ok: false, error: 'Invalid package name.' };
         const info = await runShell(`pacman -Si '${name}'`, { timeout: 8000 });
@@ -2616,7 +2619,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('apps:install', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Install runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Install runs on Outlaw Server.' };
         const app = APP_CATALOG.find((a) => a.id === id);
         if (!app) return { ok: false, error: 'Unknown app id.' };
         // Route through the outlaw-pkg-install helper (via pkexec). It enables
@@ -2645,7 +2648,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('apps:uninstall', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Uninstall runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Uninstall runs on Outlaw Server.' };
         const app = APP_CATALOG.find((a) => a.id === id);
         if (!app) return { ok: false, error: 'Unknown app id.' };
         // -Rs removes the package + any deps that become orphaned (safe).
@@ -2660,7 +2663,7 @@ function registerIpc() {
     ipcMain.handle('apps:refresh-db', async () => {
         // Optional: refresh local pacman DB without doing a full upgrade.
         // Mildly risky (partial-upgrade window) but useful before an Apps install.
-        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
         const r = await runShell('pkexec pacman -Sy --noconfirm', { timeout: 1000 * 60 * 5 });
         return { ok: r.code === 0, log: (r.stdout || r.stderr).slice(-2000) };
     });
@@ -2671,7 +2674,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('apps:launch-discovered', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
         // Re-scan and match by id so the renderer can only launch something that
         // genuinely exists on disk — never an arbitrary command from the page.
         const item = discoverApps().find((a) => a.id === id);
@@ -2949,7 +2952,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('ollama:pull', async (_e, model) => {
-        if (!IS_LINUX) return { ok: false, error: 'Ollama runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Ollama runs on Outlaw Server.' };
         const name = String(model || '').trim();
         // Ollama tags look like "qwen2.5-coder:7b" — strict charset, passed as an
         // argv entry (no shell) so it can't be an injection.
@@ -3000,7 +3003,7 @@ function registerIpc() {
         // Phase 13: install a known-source app the user just approved. Streams to
         // the loading screen via runStreamingJob; uses the robust pkg helper.
         if (action && action.tool === 'install_app') {
-            if (!IS_LINUX) return { ok: false, text: 'Installs run on Outlaw OS.', did: 'install_app' };
+            if (!IS_LINUX) return { ok: false, text: 'Installs run on Outlaw Server.', did: 'install_app' };
             const pkgs = [action.pkg, ...(Array.isArray(action.extra) ? action.extra : [])]
                 .filter((p) => typeof p === 'string' && /^[a-z0-9][a-z0-9._+-]*$/.test(p));
             if (!pkgs.length) return { ok: false, text: 'Nothing valid to install.', did: 'install_app' };
@@ -3041,7 +3044,7 @@ function registerIpc() {
         return r.stdout.split('\n').filter(Boolean);
     });
     ipcMain.handle('power:hotswap', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Hotswap runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Hotswap runs on Outlaw Server.' };
         launchDetached('outlaw-term', ['Outlaw Hotswap', 'outlaw-hotswap'], { focus: false });
         return { ok: true };
     });
@@ -3081,7 +3084,7 @@ function registerIpc() {
 
     // --- Updates / installer ---
     ipcMain.handle('updates:check', async () => {
-        if (!IS_LINUX) return { updates: 0, note: 'Updates run on Outlaw OS.' };
+        if (!IS_LINUX) return { updates: 0, note: 'Updates run on Outlaw Server.' };
         // checkupdates (pacman-contrib) counts updates safely without touching
         // the live DB. It exits 2 when there are none (→ 0 lines, fine). If it's
         // somehow missing, say so instead of silently reporting 0.
@@ -3091,7 +3094,7 @@ function registerIpc() {
         return { updates: parseInt((r.stdout || '0').trim(), 10) || 0 };
     });
     ipcMain.handle('updates:apply', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Updates run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Updates run on Outlaw Server.' };
         // Full system upgrade via the helper (ABSOLUTE path; passwordless via
         // the 49-outlaw polkit rule). -Syu is the only safe way to update on
         // Arch and covers every app installed from the Apps panel too.
@@ -3118,7 +3121,7 @@ function registerIpc() {
         return { ok: true, swapTotalMb: m ? parseInt(m[1], 10) : 0, swapfile: /swapfile=present/.test(out) };
     });
     ipcMain.handle('swap:set', async (_e, payload) => {
-        if (!IS_LINUX) return { ok: false, error: 'Storage-as-memory runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Storage-as-memory runs on Outlaw Server.' };
         const on = !!(payload && payload.on);
         const sizeGb = Math.max(1, Math.min(64, parseInt((payload && payload.sizeGb) || 4, 10) || 4));
         const cmd = on
@@ -3139,7 +3142,7 @@ function registerIpc() {
     // user's thumbnail cache and Trash (both regenerate on demand). It NEVER removes
     // installed packages, orphans or app data. Helpful on near-full disks.
     ipcMain.handle('storage:scan', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Storage cleanup runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Storage cleanup runs on Outlaw Server.' };
         // du -sm prints size in MiB; sum the safe targets. Old pacman cache = total
         // cache minus what paccache would keep (approx via a dry-run line count is
         // unreliable, so we report the whole cache as the upper bound + the rest).
@@ -3154,7 +3157,7 @@ function registerIpc() {
         return { ok: true, paccMb, thumbMb, trashMb, totalMb: paccMb + thumbMb + trashMb };
     });
     ipcMain.handle('storage:clean', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Storage cleanup runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Storage cleanup runs on Outlaw Server.' };
         // User-owned caches first (no password needed): thumbnails + Trash.
         await runShell('rm -rf "$HOME/.cache/thumbnails/"* "$HOME/.local/share/Trash/files/"* "$HOME/.local/share/Trash/info/"* 2>/dev/null; true',
             { timeout: 30000 });
@@ -3193,7 +3196,7 @@ function registerIpc() {
             tmp = dl.tmp;
             const { tarPath, sha } = dl;
             if (!IS_LINUX) {
-                return { ok: false, error: `Downloaded to ${tarPath}. Installation step only runs on Outlaw OS.` };
+                return { ok: false, error: `Downloaded to ${tarPath}. Installation step only runs on Outlaw Server.` };
             }
             // The privileged helper verifies SHA again, extracts atomically, and swaps /usr/share/outlaw-os.
             const cmd = `pkexec /usr/local/bin/outlaw-update-apply ${JSON.stringify(tarPath)} ${JSON.stringify(sha)}`;
@@ -3221,7 +3224,7 @@ function registerIpc() {
     // button below the updater. We probe for availability first so the button
     // can be disabled when there's nothing to roll back to.
     ipcMain.handle('updates:rollback-check', async () => {
-        if (!IS_LINUX) return { available: false, note: 'Rollback runs on Outlaw OS.' };
+        if (!IS_LINUX) return { available: false, note: 'Rollback runs on Outlaw Server.' };
         // The .prev directory is owned by root and not world-readable in places;
         // probe it via a tiny shell test instead of fs.access (which would EACCES
         // for non-root readers).
@@ -3230,7 +3233,7 @@ function registerIpc() {
     });
 
     ipcMain.handle('updates:rollback', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Rollback runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Rollback runs on Outlaw Server.' };
         const r = await runShell('pkexec /usr/local/bin/outlaw-update-rollback', { timeout: 1000 * 60 * 2 });
         if (r.code !== 0) {
             const msg = (r.stderr || r.stdout || `exit ${r.code}`).slice(-2000);
@@ -3310,7 +3313,7 @@ function registerIpc() {
                    : '**Anything to add?** (optional)',
             '> ',
             '',
-            '<!-- generated by Outlaw OS · Help Test This Version -->',
+            '<!-- generated by Outlaw Server · Help Test This Version -->',
         ].join('\n');
         const url = `https://github.com/${repo}/issues/new`
             + `?title=${encodeURIComponent(title)}`
@@ -3326,18 +3329,18 @@ function registerIpc() {
     // apply/revert self-elevate via pkexec (passwordless polkit allowlist).
     const DRIVER_PROFILE = '/usr/local/bin/outlaw-driver-profile';
     ipcMain.handle('drivers:detect', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw Server.' };
         const r = await runShell(`${DRIVER_PROFILE} detect`, { timeout: 8000 });
         try { return { ok: true, ...JSON.parse(r.stdout || '{}') }; }
         catch { return { ok: false, error: 'Could not detect the graphics hardware.' }; }
     });
     ipcMain.handle('drivers:preview', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw Server.' };
         const r = await runShell(`${DRIVER_PROFILE} packages`, { timeout: 8000 });
         return { ok: true, packages: (r.stdout || '').trim().split(/\s+/).filter(Boolean) };
     });
     ipcMain.handle('drivers:apply', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw Server.' };
         // Phase 12: stream to the loading screen (live phases + log) instead of a
         // single blocking call with output dumped at the end.
         const labels = ['Preparing', 'Refreshing databases', 'Installing graphics packages', 'Finishing'];
@@ -3350,7 +3353,7 @@ function registerIpc() {
         return runStreamingJob('pkexec', [DRIVER_PROFILE, 'apply', 'gaming'], labels, matchers);
     });
     ipcMain.handle('drivers:revert', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw Server.' };
         const r = await runShell(`pkexec ${DRIVER_PROFILE} revert`, { timeout: 1000 * 60 * 5 });
         return r.code === 0
             ? { ok: true, output: (r.stdout || '').slice(-800) }
@@ -3388,7 +3391,7 @@ function registerIpc() {
     // --- Session preference (set by greeter's "Always start in this session"
     // checkbox; reset here so the greeter shows on next boot). ------------
     ipcMain.handle('session:reset-greeter-pref', () => {
-        if (!IS_LINUX) return { ok: false, error: 'Greeter pref lives on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Greeter pref lives on Outlaw Server.' };
         const prefPath = path.join(os.homedir(), '.outlaw-session-pref');
         try {
             // Writing "ask" is more explicit than deleting — the greeter's
@@ -3409,7 +3412,7 @@ function registerIpc() {
     // .bash_profile + .xinitrc bring the user back into outlaw-codemaker.
     ipcMain.handle('session:switch-dev', async () => {
         if (!IS_LINUX) {
-            return { ok: false, error: 'Session switching runs on Outlaw OS.' };
+            return { ok: false, error: 'Session switching runs on Outlaw Server.' };
         }
         try {
             const home = os.homedir();
@@ -3444,7 +3447,7 @@ function registerIpc() {
     // long and network-heavy, so run it in a visible terminal (outlaw-term
     // focuses it + holds it open) rather than silently in the background.
     ipcMain.handle('session:setup-dev', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw OS.' };
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
         launchDetached('outlaw-term', ['Set up Dev session', 'outlaw-setup-dev'], { focus: false });
         return { ok: true };
     });

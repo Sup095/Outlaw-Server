@@ -27,6 +27,9 @@
 
     const RPC = '/rpc';
 
+    // Ring buffer of UI faults, for the crash reporter below.
+    const recentFaults = [];
+
     async function invoke(op, args) {
         let res;
         try {
@@ -74,7 +77,7 @@
 
     // --- the API surface ----------------------------------------------------
     // Mirrors preload.js so the renderer is transport-agnostic.
-    window.outlaw = {
+    const bridge = {
         system: {
             info: () => invoke('system:info'),
             stats: () => invoke('system:stats'),
@@ -101,10 +104,57 @@
         daemon: {
             info: () => invoke('daemon:info'),
         },
+        // The UI's crash reporter calls into this on every uncaught error. It
+        // therefore has to SUCCEED QUIETLY even when there is nowhere to write:
+        // a reporter that rejects gets reported, and that is a loop. Until the
+        // daemon carries a real error log, keep the most recent entries in
+        // memory so the page can still show them.
+        errorlog: {
+            add: (entry) => {
+                try {
+                    recentFaults.push({ at: new Date().toISOString(), ...(entry || {}) });
+                    if (recentFaults.length > 200) recentFaults.shift();
+                } catch { /* never throw from the error path */ }
+                return Promise.resolve({ ok: true });
+            },
+            read: () => Promise.resolve({ ok: true, entries: recentFaults.slice() }),
+            clear: () => { recentFaults.length = 0; return Promise.resolve({ ok: true }); },
+        },
         // Escape hatch for operations the UI knows about before this bridge does.
         invoke,
         on,
         // Electron-only nicety; harmless no-op in a browser (the page can zoom).
         setZoom: () => {},
     };
+
+    // --- honest degradation for what isn't wired yet -------------------------
+    // The panel UI is shared with the Electron build, which reaches a much
+    // larger API (files, terminal, settings, the app catalogue…). Those are
+    // being brought across to the daemon phase by phase.
+    //
+    // Until then, touching one must NOT be a bare `undefined is not a function`
+    // TypeError: that reads as a broken page, tells the admin nothing, and (in
+    // the paths without a try/catch) takes the rest of an init routine down with
+    // it. Every unknown namespace instead answers with a real function that
+    // rejects with a sentence explaining exactly what happened.
+    //
+    // This is the "degrade visibly, never silently" rule at the top of the file,
+    // enforced rather than merely documented.
+    const notYet = (path) => () => Promise.reject(new Error(
+        `"${path}" isn't available in the browser panel yet — it still runs only in the local Electron panel. `
+        + 'Use SSH or the `outlaw` command for now.',
+    ));
+
+    window.outlaw = new Proxy(bridge, {
+        get(target, prop) {
+            if (prop in target) return target[prop];
+            if (typeof prop !== 'string') return undefined;
+            // Hand back a namespace object whose every member is a clear refusal.
+            return new Proxy({}, {
+                get: (_t, method) => (typeof method === 'string' ? notYet(`${prop}.${method}`) : undefined),
+            });
+        },
+        // Keep `'x' in window.outlaw` and Object.keys() honest about what is real.
+        has: (target, prop) => prop in target,
+    });
 })();
