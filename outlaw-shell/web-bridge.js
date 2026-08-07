@@ -142,19 +142,34 @@
     //
     // This is the "degrade visibly, never silently" rule at the top of the file,
     // enforced rather than merely documented.
-    const notYet = (path) => () => Promise.reject(new Error(
-        `"${path}" isn't available in the browser panel yet — it still runs only in the local Electron panel. `
-        + 'Use SSH or the `outlaw` command for now.',
-    ));
+    // The refusal has to work at ANY depth. A one-level version looked right and
+    // wasn't: `api.ai.chats.save(...)` made `api.ai.chats` the refusal function,
+    // and `.save` on a function is undefined — so the very TypeError this exists
+    // to prevent came back, just one level further down. Each refusal is
+    // therefore both callable (rejects) and indexable (yields another refusal).
+    const notYet = (path) => new Proxy(function () {}, {
+        apply: () => Promise.reject(new Error(
+            `"${path}" isn't available in the browser panel yet — it still runs only in the local Electron panel. `
+            + 'Use SSH or the `outlaw` command for now.',
+        )),
+        get(target, prop) {
+            // `await api.foo.bar` (no call) must not mistake this for a promise:
+            // a truthy `then` would make await try to resolve it forever.
+            if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
+            // Let stringification and instanceof behave like a normal function
+            // rather than returning a proxy where a primitive is required.
+            if (typeof prop !== 'string' || prop === 'toString' || prop === 'valueOf' || prop === 'constructor') {
+                return Reflect.get(target, prop);
+            }
+            return notYet(`${path}.${prop}`);
+        },
+    });
 
     window.outlaw = new Proxy(bridge, {
         get(target, prop) {
             if (prop in target) return target[prop];
             if (typeof prop !== 'string') return undefined;
-            // Hand back a namespace object whose every member is a clear refusal.
-            return new Proxy({}, {
-                get: (_t, method) => (typeof method === 'string' ? notYet(`${prop}.${method}`) : undefined),
-            });
+            return notYet(prop);
         },
         // Keep `'x' in window.outlaw` and Object.keys() honest about what is real.
         has: (target, prop) => prop in target,

@@ -5,9 +5,10 @@ Built on the same hardened foundation as [Outlaw OS](https://github.com/Sup095/O
 with everything a desktop needs and a server doesn't ripped out — and everything a
 server admin needs added in.
 
-> **Status: alpha (Phase 4 of 6).** Forked from Outlaw OS v2.0.180. The control
-> daemon, sign-in, remote access and the core server tools work; one-click game
-> servers are still being built. Not yet tested on real hardware.
+> **Status: alpha (Phase 6 of 6).** Forked from Outlaw OS v2.0.180. The control
+> daemon, sign-in, remote access, the server toolset and one-click game servers
+> are all in. What's left is polish and the thing that matters most:
+> **none of it has run on real hardware yet.**
 
 ---
 
@@ -55,7 +56,7 @@ guarded terminal.
 | ✅ | **3 · Remote access** | Tailscale/WireGuard — manage every box from anywhere, with nothing on the public internet. |
 | ✅ | **4 · Server toolset** | Services, journal viewer, firewall, SSH keys and storage — all reachable from either frontend. |
 | ✅ | **5 · Game servers** | One-click Docker, Portainer and Cockpit, plus a guided Pterodactyl install. All removable. |
-| 🔭 | **6 · Polish & first install** | Accessibility pass, docs, and the first real-hardware test. |
+| 🚧 | **6 · Polish & first install** | Accessibility pass, docs, and the first real-hardware test. |
 
 ### Signing in
 

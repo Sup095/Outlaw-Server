@@ -37,7 +37,7 @@
         </div>
 
         <div id="signin-pw-mode" hidden>
-            <input id="signin-pw" type="password" autocomplete="off" placeholder="Your account password">
+            <input id="signin-pw" aria-label="Your account password" type="password" autocomplete="off" placeholder="Your account password">
             <button id="signin-pw-go" class="primary" type="button">Sign in</button>
             <a href="#" id="use-pin" class="signin-link" hidden>Use PIN instead</a>
         </div>
@@ -69,7 +69,6 @@
         <span class="stat pill" id="stat-cpu">CPU --%</span>
         <span class="stat pill" id="stat-ram">RAM --</span>
         <span class="stat pill" id="stat-ai">AI OFF</span>
-        <span class="stat pill" id="stat-battery" title="Battery" hidden></span>
         <button class="stat pill" id="stat-clock" title="Calendar" aria-label="Open the calendar" style="padding:4px 8px;">--:--:--</button>
         <button data-action="power-menu" title="Power — lock, restart or shut down" aria-label="Power menu — lock, restart or shut down" style="padding:6px 10px;">⏻</button>
     </header>
@@ -123,7 +122,7 @@
             </div>
             <div class="card">
                 <div class="row" style="align-items:center;"><h2 style="margin:0;">Storage</h2><span class="spacer"></span>
-                    <button data-action="disk-refresh">↻</button>
+                    <button data-action="disk-refresh" aria-label="Refresh storage usage" title="Re-read disk usage">↻</button>
                 </div>
                 <div class="dim" style="font-size:11px;margin:4px 0 10px;">A server that runs out of disk stops serving — and usually stops logging why.</div>
                 <div id="disk-list"><div class="muted">Loading…</div></div>
@@ -138,7 +137,7 @@
         <!-- Files -->
         <section class="screen" id="screen-files">
             <div class="row"><h2>File Manager</h2><span class="spacer"></span>
-                <input id="fs-filter" placeholder="Filter this folder…" autocomplete="off" style="width:auto;min-width:150px;">
+                <input id="fs-filter" aria-label="Filter files in this folder" placeholder="Filter this folder…" autocomplete="off" style="width:auto;min-width:150px;">
                 <button data-action="files-up">↑ Up</button>
                 <button data-action="files-home">⌂ Home</button>
                 <button class="primary" data-action="files-open-fm" title="Open this folder in the full file manager (Thunar) to open, copy, rename and right-click files.">📂 Open in file manager</button>
@@ -173,7 +172,7 @@
                 <div class="card"><div class="muted">GPU / VRAM</div><div class="bar"><span id="gpu-bar"></span></div><div id="gpu-val" class="mono">--</div></div>
             </div>
             <div class="row" style="gap:8px;margin:10px 0 6px;align-items:center;flex-wrap:wrap;">
-                <input id="proc-filter" placeholder="Filter by name…" autocomplete="off" style="width:auto;flex:0 1 220px;min-width:160px;">
+                <input id="proc-filter" aria-label="Filter processes by name" placeholder="Filter by name…" autocomplete="off" style="width:auto;flex:0 1 220px;min-width:160px;">
                 <button id="task-end" type="button" disabled>End task</button>
                 <button id="task-end-tree" class="danger" type="button" disabled>End process tree</button>
                 <span id="task-sel" class="muted mono"></span>
@@ -194,7 +193,7 @@
         <!-- Services -->
         <section class="screen" id="screen-services">
             <div class="row"><h2>Services</h2><span class="spacer"></span>
-                <input id="svc-filter" placeholder="Filter services…" autocomplete="off" style="width:auto;flex:0 1 220px;min-width:160px;">
+                <input id="svc-filter" placeholder="Filter services…" aria-label="Filter services by name or description" autocomplete="off" style="width:auto;flex:0 1 220px;min-width:160px;">
                 <button data-action="svc-refresh">↻ Refresh</button>
             </div>
             <details class="page-help">
@@ -213,13 +212,13 @@
                     <tbody id="svc-body"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
                 </div>
             </div>
-            <div id="svc-msg" class="muted mono" style="margin-top:8px;"></div>
+            <div id="svc-msg" class="muted mono" style="margin-top:8px;" role="status" aria-live="polite" aria-atomic="true"></div>
         </section>
 
         <!-- Logs -->
         <section class="screen" id="screen-logs">
             <div class="row"><h2>System Log</h2><span class="spacer"></span>
-                <input id="log-unit" placeholder="Service (blank = everything)" autocomplete="off" style="width:auto;flex:0 1 240px;min-width:170px;">
+                <input id="log-unit" placeholder="Service (blank = everything)" aria-label="Limit the log to one service (blank shows everything)" autocomplete="off" style="width:auto;flex:0 1 240px;min-width:170px;">
                 <select id="log-lines" aria-label="How many lines" style="width:auto;">
                     <option value="200">200 lines</option>
                     <option value="500">500 lines</option>
@@ -239,7 +238,7 @@
         <!-- Firewall -->
         <section class="screen" id="screen-firewall">
             <div class="row"><h2>Firewall</h2><span class="spacer"></span>
-                <span id="fw-state" class="badge">checking…</span>
+                <span id="fw-state" class="badge" role="status" aria-live="polite" aria-atomic="true">checking…</span>
                 <button data-action="fw-refresh">↻ Refresh</button>
             </div>
             <details class="page-help">
@@ -250,13 +249,13 @@
             <div class="card">
                 <div class="setting">
                     <div class="label">Firewall<small id="fw-sub">Denies incoming connections that aren't explicitly allowed.</small></div>
-                    <label class="switch"><input type="checkbox" id="fw-toggle"><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="fw-toggle" aria-label="Firewall enabled"><span class="track"></span></label>
                 </div>
             </div>
             <div class="card">
                 <h3>Open a port</h3>
                 <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;">
-                    <input id="fw-port" placeholder="Port (e.g. 25565)" inputmode="numeric" autocomplete="off" style="width:auto;flex:0 1 170px;">
+                    <input id="fw-port" placeholder="Port (e.g. 25565)" aria-label="Port number to open or deny" inputmode="numeric" autocomplete="off" style="width:auto;flex:0 1 170px;">
                     <select id="fw-proto" aria-label="Protocol" style="width:auto;">
                         <option value="tcp">TCP</option>
                         <option value="udp">UDP</option>
@@ -264,7 +263,7 @@
                     <button id="fw-allow" class="primary" type="button">Allow</button>
                     <button id="fw-deny" type="button">Deny</button>
                 </div>
-                <div id="fw-msg" class="muted mono" style="margin-top:8px;"></div>
+                <div id="fw-msg" class="muted mono" style="margin-top:8px;" role="status" aria-live="polite" aria-atomic="true"></div>
             </div>
             <div class="card" style="padding-top:8px;">
                 <h3>Rules</h3>
@@ -292,7 +291,7 @@
                 <p>The panel will only listen on <b>loopback</b> (this machine alone) or on a <b>tunnel address</b>. A LAN or public address is refused outright, because the panel speaks plain HTTP and your password would cross the wire in the clear.</p>
             </details>
             <div class="card">
-                <div id="remote-summary" class="mono" style="line-height:1.8;">Loading…</div>
+                <div id="remote-summary" class="mono" style="line-height:1.8;" role="status" aria-live="polite">Loading…</div>
             </div>
             <div class="card">
                 <h3>Set it up</h3>
@@ -312,9 +311,9 @@ sudo outlaw remote bind tunnel</pre>
                 <summary>How does the terminal work?</summary>
                 <p>A normal shell — type a command and press Enter; output appears above. It runs in your home folder as you. <b>Destructive commands</b> (like <code>rm -rf</code>, <code>dd</code>, <code>mkfs</code>) are intercepted and need you to type <b>CONFIRM</b> first, so you can't wipe the machine by accident. Use <code>sudo</code> for admin tasks; <code>pacman</code> for packages (or just use the Apps page).</p>
             </details>
-            <textarea id="term-out" readonly placeholder="Output appears here. Try a command like:  ls   ·   pwd   ·   neofetch"></textarea>
+            <textarea id="term-out" aria-label="Terminal output" readonly placeholder="Output appears here. Try a command like:  ls   ·   pwd   ·   neofetch"></textarea>
             <div class="term-hint" id="term-hint"></div>
-            <input id="term-in" placeholder="> command…  (destructive commands require confirmation)" autocomplete="off" spellcheck="false">
+            <input id="term-in" aria-label="Command to run" placeholder="> command…  (destructive commands require confirmation)" autocomplete="off" spellcheck="false">
         </section>
 
 
@@ -324,7 +323,7 @@ sudo outlaw remote bind tunnel</pre>
             <div class="row">
                 <h2>Apps</h2>
                 <span class="spacer"></span>
-                <button data-action="server-apps-refresh" title="Re-check what's installed">↻</button>
+                <button data-action="server-apps-refresh" aria-label="Refresh server software status" title="Re-check what's installed">↻</button>
                 <button id="apps-refresh-db" title="Sync the local package database (pacman -Sy). Useful if Install fails with 'target not found'.">↻ Refresh package list</button>
             </div>
 
@@ -341,7 +340,7 @@ sudo outlaw remote bind tunnel</pre>
 
             <div class="card">
                 <div class="row" style="align-items:center;"><h3 style="margin:0;">Pterodactyl (game servers)</h3><span class="spacer"></span>
-                    <button data-action="ptero-refresh">↻</button>
+                    <button data-action="ptero-refresh" aria-label="Refresh Pterodactyl status" title="Re-check the Pterodactyl install">↻</button>
                 </div>
                 <details class="page-help">
                     <summary>What is this?</summary>
@@ -370,19 +369,20 @@ sudo outlaw remote bind tunnel</pre>
                 </div>
             </div>
             <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap;align-items:center;">
-                <input id="apps-search" type="search" placeholder="Search apps by name or description…"
+                <input id="apps-search" aria-label="Search apps by name or description" type="search" placeholder="Search apps by name or description…"
                        style="flex:1;min-width:200px;"
                        autocomplete="off" spellcheck="false">
                 <div id="apps-filters" class="row" style="gap:4px;flex-wrap:wrap;">
                     <button class="chip active" data-apps-filter="all">All</button>
                     <button class="chip" data-apps-filter="Essentials">Essentials</button>
-                    <button class="chip" data-apps-filter="Game Dev">Game Dev</button>
-                    <button class="chip" data-apps-filter="Gaming">Gaming</button>
-                    <button class="chip" data-apps-filter="Browsers">Browsers</button>
-                    <button class="chip" data-apps-filter="Productivity">Productivity</button>
+                    <button class="chip" data-apps-filter="Server">Server</button>
+                    <button class="chip" data-apps-filter="Monitoring">Monitoring</button>
+                    <button class="chip" data-apps-filter="Backup">Backup</button>
+                    <button class="chip" data-apps-filter="Network">Network</button>
+                    <button class="chip" data-apps-filter="Editors">Editors</button>
                     <button class="chip" data-apps-filter="Security">Security</button>
                     <button class="chip" data-apps-filter="installed">Installed</button>
-                    <button class="chip" data-apps-filter="discovered">On this PC</button>
+                    <button class="chip" data-apps-filter="discovered">On this machine</button>
                 </div>
             </div>
             <div id="apps-list"><div class="muted" style="padding:24px;text-align:center;">Loading catalog…</div></div>
@@ -396,30 +396,23 @@ sudo outlaw remote bind tunnel</pre>
 
             <details class="page-help">
                 <summary>How does the AI work?</summary>
-                <p>Outlaw runs AI <b>privately on this PC</b> — no internet, no account, nothing leaves the machine. You can run it three ways: the <b>built-in</b> tiny model (already on, zero setup), <b>Ollama</b> (one command, works on any GPU or CPU), or <b>LM Studio</b> (a point-and-click app). Click <b>Check my PC</b> below and Outlaw reads your RAM, GPU and CPU, picks a model your hardware can actually run, and recommends the best engine for it — then walks you through that path.</p>
+                <p>The AI runs <b>privately on this machine</b> — no internet, no account, nothing leaves the box. You can run it three ways: the <b>built-in</b> tiny model (zero setup), <b>Ollama</b> (one command, works on any GPU or CPU), or <b>LM Studio</b> (a point-and-click app). Click <b>Check this machine</b> below and Outlaw reads your RAM, GPU and CPU, picks a model your hardware can actually run, and recommends the best engine for it.</p>
+                <p>It is <b>off until you set it up</b>, and once running it loads only while it's answering and unloads itself afterward — an idle server spends nothing on it. On a small box the honest answer is sometimes "don't", and it will say so.</p>
             </details>
 
             <div class="card" id="ai-setup-card">
                 <h3>Set up your private AI</h3>
-                <p class="muted" style="margin:0 0 10px;">One-time setup. Outlaw reads your RAM, GPU and CPU and recommends a model that fits.</p>
+                <p class="muted" style="margin:0 0 10px;">One-time setup. Outlaw reads your RAM, GPU and CPU and recommends a model that fits — leaving room for what this server is actually running.</p>
                 <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-                    <span class="muted">This AI is for:</span>
-                    <select id="ai-purpose" aria-label="What this AI is for" style="width:auto;min-width:150px;">
-                        <option value="desktop">the Desktop</option>
-                        <option value="dev">the Dev session</option>
-                    </select>
                     <span id="ai-tier-wrap">
                         <select id="ai-tier" aria-label="Preferred AI model size" style="width:auto;min-width:190px;">
                             <option value="powerful">most powerful I can run</option>
                             <option value="minimal">minimal but useful</option>
                         </select>
                     </span>
-                    <label id="ai-spill-wrap" style="display:none;align-items:center;gap:6px;">
-                        <input type="checkbox" id="ai-spill"> spill into RAM (bigger, slower)
-                    </label>
                 </div>
                 <div class="row" style="gap:8px;flex-wrap:wrap;">
-                    <button class="primary" id="ai-check-pc" type="button">Check my PC</button>
+                    <button class="primary" id="ai-check-pc" type="button">Check this machine</button>
                     <button id="ai-get-lmstudio" type="button">Get / Open LM Studio</button>
                 </div>
                 <div id="ai-setup-result" style="margin-top:12px;"></div>
@@ -427,7 +420,7 @@ sudo outlaw remote bind tunnel</pre>
                     <div class="label" style="margin-bottom:6px;">Stuck? Ask the AI to set itself up<small>Once any model is running (built-in, Ollama or LM Studio) it answers right here — already knowing your exact hardware.</small></div>
                     <div id="ai-setup-chat-log" style="margin-bottom:8px;"></div>
                     <div class="row" style="gap:8px;">
-                        <input id="ai-setup-chat-in" placeholder="e.g. which model should I pick? how do I start the server?" autocomplete="off">
+                        <input id="ai-setup-chat-in" aria-label="Ask about setting up the AI" placeholder="e.g. which model should I pick? how do I start the server?" autocomplete="off">
                         <button id="ai-setup-chat-send" type="button">Ask</button>
                     </div>
                 </div>
@@ -435,14 +428,14 @@ sudo outlaw remote bind tunnel</pre>
 
             <div class="card">
                 <div class="row" id="ai-chats-bar" style="gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-                    <select id="ai-chat-select" title="Switch conversation" style="width:auto;min-width:160px;flex:1;"></select>
+                    <select id="ai-chat-select" aria-label="Switch conversation" title="Switch conversation" style="width:auto;min-width:160px;flex:1;"></select>
                     <button id="ai-chat-new" type="button" title="Start a new conversation">+ New</button>
                     <button id="ai-chat-delete" type="button" title="Delete this conversation">Delete</button>
-                    <select id="ai-ref-select" title="Reference another chat into this one — Cr1tt3r will draw on it" style="width:auto;min-width:130px;"></select>
+                    <select id="ai-ref-select" aria-label="Reference another chat into this one" title="Reference another chat into this one — Cr1tt3r will draw on it" style="width:auto;min-width:130px;"></select>
                 </div>
                 <div id="ai-log"></div>
                 <div class="row" style="margin-top:10px;">
-                    <input id="ai-in" placeholder="Ask anything, or 'install krita', 'use less VRAM', 'open apps'…" autocomplete="off">
+                    <input id="ai-in" aria-label="Ask the AI helper" placeholder="Ask anything, or 'install krita', 'use less VRAM', 'open apps'…" autocomplete="off">
                     <button class="primary" data-action="ai-send">Send</button>
                 </div>
             </div>
@@ -458,14 +451,14 @@ sudo outlaw remote bind tunnel</pre>
                 <p><b>AI &amp; VRAM</b> — turn the local AI on/off and pick how aggressively it saves video memory. <b>System Package Updates</b> — check for and apply updates to every installed app + the system. <b>Outlaw Shell Updates</b> — update Outlaw Server itself and choose the stable or beta channel. <b>Help Test This Version</b> — tell the maintainer whether this build works. <b>Report a problem</b> — send the error log to the maintainer.</p>
             </details>
 
-            <input type="text" id="settings-search" placeholder="🔍 Search settings…" autocomplete="off" spellcheck="false"
+            <input type="text" id="settings-search" aria-label="Search settings" placeholder="🔍 Search settings…" autocomplete="off" spellcheck="false"
                    style="width:100%;margin:0 0 14px;padding:9px 12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);">
             <div id="settings-no-match" class="muted" style="display:none;padding:8px 2px;">No settings match that search.</div>
 
             <div class="card" id="about-card">
                 <h3>About</h3>
                 <p class="muted" style="margin:0;">Outlaw Game OS &nbsp;·&nbsp; version <span id="about-version" class="mono">…</span></p>
-                <p class="muted" style="margin:6px 0 0;font-size:11px;">A lightweight, AI-driven Linux for building Godot games on modest hardware. Found a problem? Use <b>Report a problem</b> below.</p>
+                <p class="muted" style="margin:6px 0 0;font-size:11px;">A stripped-down, security-first Linux server OS you manage from a browser. Found a problem? Use <b>Report a problem</b> below.</p>
             </div>
 
             <div class="card" id="storage-card">
@@ -484,11 +477,11 @@ sudo outlaw remote bind tunnel</pre>
                 <h3>Local AI Assistant</h3>
                 <div class="setting">
                     <div class="label">Enable on-device AI<small id="ai-sub">Off · the System Core + AI Assistant run locally on this machine</small></div>
-                    <label class="switch"><input type="checkbox" id="ai-toggle"><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="ai-toggle" aria-label="Enable on-device AI"><span class="track"></span></label>
                 </div>
                 <div class="setting" style="display:none;">
                     <div class="label">Use the built-in AI<small id="base-ai-sub">superseded by AI engine below</small></div>
-                    <label class="switch"><input type="checkbox" id="base-ai-toggle" checked><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="base-ai-toggle" aria-label="Use the built-in AI" checked><span class="track"></span></label>
                 </div>
                 <div class="setting">
                     <div class="label">AI engine<small id="ai-engine-sub">What runs the model on this PC.</small></div>
@@ -501,7 +494,7 @@ sudo outlaw remote bind tunnel</pre>
                 <div class="setting" id="ollama-model-row" style="display:none;">
                     <div class="label">Ollama model<small id="ollama-model-sub">Model tag to run (e.g. qwen2.5-coder:7b). Pull downloads it, then uses it.</small></div>
                     <div class="row" style="gap:6px;align-items:center;">
-                        <input id="ollama-model" placeholder="qwen2.5-coder:7b" autocomplete="off" style="width:170px;">
+                        <input id="ollama-model" aria-label="Ollama model name" placeholder="qwen2.5-coder:7b" autocomplete="off" style="width:170px;">
                         <button id="ollama-pull" type="button">Pull &amp; use</button>
                     </div>
                 </div>
@@ -511,7 +504,7 @@ sudo outlaw remote bind tunnel</pre>
                 </div>
                 <div class="setting">
                     <div class="label">Use storage as extra memory<small id="swap-sub">Adds a swapfile so a low-RAM PC won't run out of memory under AI load — slower than real RAM, fully reversible.</small></div>
-                    <label class="switch"><input type="checkbox" id="swap-toggle"><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="swap-toggle" aria-label="Use storage as extra memory"><span class="track"></span></label>
                 </div>
             </div>
 
@@ -519,7 +512,7 @@ sudo outlaw remote bind tunnel</pre>
                 <h3>Network &amp; Wi-Fi</h3>
                 <div class="setting" style="margin-bottom:10px;">
                     <div class="label">✈ Airplane mode<small>Turns Wi-Fi (and Bluetooth) off and engages offline mode. Toggle off to reconnect.</small></div>
-                    <label class="switch"><input type="checkbox" id="airplane-toggle"><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="airplane-toggle" aria-label="Airplane mode"><span class="track"></span></label>
                 </div>
                 <div class="row" style="margin-bottom:10px;">
                     <span id="net-status" class="muted" aria-live="polite" aria-atomic="true">Checking connection…</span>
@@ -549,7 +542,7 @@ sudo outlaw remote bind tunnel</pre>
                 <h3>Security &amp; sign-in</h3>
                 <div class="setting">
                     <div class="label">Ask to sign in on startup<small>Lock the desktop until you enter your PIN or password</small></div>
-                    <label class="switch"><input type="checkbox" id="lock-toggle"><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="lock-toggle" aria-label="Ask to sign in on startup"><span class="track"></span></label>
                 </div>
                 <div class="setting">
                     <div class="label">Auto-lock when idle<small id="autolock-sub">Lock the desktop automatically after a period of no activity. Needs a PIN.</small></div>
@@ -570,9 +563,9 @@ sudo outlaw remote bind tunnel</pre>
                 </div>
                 <!-- display comes from CSS (not inline) so the [hidden] attribute actually hides it -->
                 <div id="pin-form" hidden>
-                    <input id="pin-current" type="password" inputmode="numeric" maxlength="4" placeholder="Current PIN" hidden>
-                    <input id="pin-new" type="password" inputmode="numeric" maxlength="4" placeholder="New 4-digit PIN">
-                    <input id="pin-confirm" type="password" inputmode="numeric" maxlength="4" placeholder="Confirm new PIN">
+                    <input id="pin-current" aria-label="Current PIN" type="password" inputmode="numeric" maxlength="4" placeholder="Current PIN" hidden>
+                    <input id="pin-new" aria-label="New 4-digit PIN" type="password" inputmode="numeric" maxlength="4" placeholder="New 4-digit PIN">
+                    <input id="pin-confirm" aria-label="Confirm the new PIN" type="password" inputmode="numeric" maxlength="4" placeholder="Confirm new PIN">
                     <div class="row" style="gap:6px;">
                         <button id="pin-save" class="primary">Save PIN</button>
                         <button id="pin-cancel">Cancel</button>
@@ -589,17 +582,17 @@ sudo outlaw remote bind tunnel</pre>
                     <p>Paste the contents of your <span class="mono">.pub</span> file (usually <span class="mono">~/.ssh/id_ed25519.pub</span>). <b>Never paste a private key</b> — that is the half that stays on your own machine, and pasting it here would be handing it away.</p>
                 </details>
                 <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-start;">
-                    <input id="ssh-key-in" placeholder="ssh-ed25519 AAAA… you@laptop" autocomplete="off" spellcheck="false" style="flex:1 1 320px;min-width:220px;">
+                    <input id="ssh-key-in" placeholder="ssh-ed25519 AAAA… you@laptop" aria-label="Public key to authorise — paste the contents of your .pub file, never a private key" autocomplete="off" spellcheck="false" style="flex:1 1 320px;min-width:220px;">
                     <button id="ssh-key-add" class="primary" type="button">Authorise</button>
                 </div>
-                <div id="ssh-key-msg" class="muted mono" style="margin-top:8px;word-break:break-word;"></div>
+                <div id="ssh-key-msg" class="muted mono" style="margin-top:8px;word-break:break-word;" role="status" aria-live="polite" aria-atomic="true"></div>
                 <div id="ssh-key-list" style="margin-top:10px;"></div>
             </div>
 
             <div class="card">
                 <h3>Appearance</h3>
                 <div class="setting">
-                    <div class="label">Theme<small>Switch the whole desktop's look. Gold Gunmetal matches Outlaw CodeMaker</small></div>
+                    <div class="label">Theme<small>Switch the whole panel's look. Applies everywhere — at the machine and in a browser</small></div>
                     <select id="theme-select" aria-label="Theme" style="width:auto;min-width:200px;">
                         <option value="green">Green Phosphor (default)</option>
                         <option value="gold">Gold Gunmetal (sci-fi fortress)</option>
@@ -608,11 +601,11 @@ sudo outlaw remote bind tunnel</pre>
                 </div>
                 <div class="setting">
                     <div class="label">CRT scanlines + flicker<small>Retro effect. Off = crisp, no scanlines or discoloration</small></div>
-                    <label class="switch"><input type="checkbox" id="crt-toggle"><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="crt-toggle" aria-label="CRT scanlines and flicker"><span class="track"></span></label>
                 </div>
                 <div class="setting">
                     <div class="label">Phosphor glow<small>Subtle text glow. Off for maximum readability</small></div>
-                    <label class="switch"><input type="checkbox" id="glow-toggle"><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="glow-toggle" aria-label="Phosphor glow"><span class="track"></span></label>
                 </div>
                 <div class="setting">
                     <div class="label">Reduce motion<small>Turns off decorative animations + transitions — easier on the eyes and lighter on low-end PCs</small></div>
@@ -656,7 +649,7 @@ sudo outlaw remote bind tunnel</pre>
                 </div>
                 <div class="setting">
                     <div class="label">Background auto-check<small>Quietly polls every 6 hours; notifies you when a new release is published</small></div>
-                    <label class="switch"><input type="checkbox" id="auto-check"><span class="track"></span></label>
+                    <label class="switch"><input type="checkbox" id="auto-check" aria-label="Background auto-check for updates"><span class="track"></span></label>
                 </div>
                 <div class="row" style="margin-top:8px;">
                     <button data-action="check-shell">Check for shell updates</button>
@@ -664,14 +657,14 @@ sudo outlaw remote bind tunnel</pre>
                     <span id="shell-update-status" class="muted mono" aria-live="polite" aria-atomic="true"></span>
                 </div>
                 <div class="muted" style="margin:6px 0 0;font-size:11px;">
-                    An update refreshes the <b>whole system</b>, not just the desktop — the shell, the
-                    helper tools, the greeter, the installer and Outlaw CodeMaker, and it installs any
-                    <b>new packages</b> added since you installed (so things like audio aren't left behind).
+                    An update refreshes the <b>whole system</b>, not just the panel — the shell, the
+                    control daemon, the helper tools and the installer — and it installs any
+                    <b>new packages</b> added since you installed, so nothing is left behind.
                     Your files, apps and settings are kept.
                 </div>
                 <div class="row" style="margin-top:8px;align-items:center;">
                     <button data-action="repair-shell" id="repair-shell-btn"
-                            title="Re-download the latest release and reinstall ALL Outlaw code (shell, helper tools, installer, CodeMaker). Your files, apps and settings are kept. Fixes a half-applied or out-of-sync update.">
+                            title="Re-download the latest release and reinstall ALL Outlaw code (shell, control daemon, helper tools, installer). Your files, apps and settings are kept. Fixes a half-applied or out-of-sync update.">
                         ⟳ Reinstall / repair all components
                     </button>
                     <span id="repair-status" class="muted mono" aria-live="polite" aria-atomic="true"></span>
@@ -736,14 +729,14 @@ sudo outlaw remote bind tunnel</pre>
 
             <div class="card" id="report-card">
                 <h3>Report a problem</h3>
-                <p class="muted" style="margin:0 0 10px;">If something failed, crashed, or bounced you to the session picker, collect the log and report it. It gathers errors + warnings from the desktop, the dev session, Xorg and the system journal — deduplicated, no repeats. <b>Copy</b> the log, click <b>Open GitHub issues</b>, and paste it into a new issue. When you’re done reporting, <b>Clear</b> it so already-sent errors don’t pile up with new ones.</p>
+                <p class="muted" style="margin:0 0 10px;">If something failed or crashed, collect the log and report it. It gathers errors + warnings from the panel, the control daemon, Xorg and the system journal — deduplicated, no repeats. <b>Copy</b> the log, click <b>Open GitHub issues</b>, and paste it into a new issue. Read it before you post — it’s a log from your machine, so hostnames and paths are in there. When you’re done, <b>Clear</b> it so already-sent errors don’t pile up with new ones.</p>
                 <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:10px;">
                     <button class="primary" id="errlog-refresh" type="button">Collect errors</button>
                     <button id="errlog-copy" type="button">Copy</button>
                     <button id="errlog-github" type="button">Open GitHub issues</button>
                     <button class="danger" id="errlog-clear" type="button">Clear</button>
                 </div>
-                <textarea id="errlog-view" readonly style="width:100%;height:170px;font-family:monospace;font-size:11px;background:var(--panel-2,#0d130d);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;" placeholder="Click “Collect errors” to gather recent errors + warnings…"></textarea>
+                <textarea id="errlog-view" aria-label="Collected error log" readonly style="width:100%;height:170px;font-family:monospace;font-size:11px;background:var(--panel-2,#0d130d);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;" placeholder="Click “Collect errors” to gather recent errors + warnings…"></textarea>
             </div>
         </section>
 
@@ -751,7 +744,7 @@ sudo outlaw remote bind tunnel</pre>
         <section class="screen" id="screen-help">
             <div class="row"><h2>Help</h2><span class="spacer"></span>
                 <button id="help-replay-tour" type="button" title="Replay the welcome tour">▶ Replay tour</button>
-                <input id="help-search" placeholder="Search help…" autocomplete="off" style="width:auto;flex:0 1 280px;min-width:180px;">
+                <input id="help-search" aria-label="Search help topics" placeholder="Search help…" autocomplete="off" style="width:auto;flex:0 1 280px;min-width:180px;">
             </div>
             <p class="muted" style="margin:0 0 12px;">Everything about Outlaw Server — how each part works and how to fix common problems. Click a topic to expand it.</p>
             <div id="help-results"></div>
@@ -767,7 +760,7 @@ sudo outlaw remote bind tunnel</pre>
         <p id="confirm-reason" class="muted"></p>
         <pre id="confirm-cmd"></pre>
         <p class="muted">Type <strong>CONFIRM</strong> to proceed. This can destroy data.</p>
-        <input id="confirm-input" placeholder="CONFIRM" autocomplete="off">
+        <input id="confirm-input" aria-label="Type CONFIRM to proceed" placeholder="CONFIRM" autocomplete="off">
         <div class="actions">
             <button data-action="confirm-cancel">Cancel</button>
             <button class="danger" id="confirm-go" disabled>Run anyway</button>
@@ -784,7 +777,6 @@ sudo outlaw remote bind tunnel</pre>
         <h3 id="power-title">Power</h3>
         <div class="row">
             <button data-action="lock">🔒 Lock</button>
-            <button data-action="sleep" title="Sleep (suspend to RAM) — press a key or the power button to wake">🌙 Sleep</button>
             <button data-action="hotswap">⇄ Hotswap</button>
             <button data-action="reboot">↻ Reboot</button>
             <button class="danger" data-action="shutdown">⏻ Shutdown</button>
@@ -821,7 +813,7 @@ sudo outlaw remote bind tunnel</pre>
      apps and actions from anywhere. -->
 <div id="palette" hidden>
     <div class="pal-card" role="dialog" aria-modal="true" aria-label="Command palette">
-        <input id="pal-input" placeholder="Search apps, settings, help topics, actions…"
+        <input id="pal-input" aria-label="Search apps, settings, help topics and actions" placeholder="Search apps, settings, help topics, actions…"
                aria-label="Search everything" autocomplete="off" spellcheck="false">
         <div id="pal-list" role="listbox" aria-label="Results"></div>
         <div class="dim" style="font-size:11px;padding:6px 12px;border-top:1px solid var(--line);">↑↓ choose · Enter run · Esc close</div>

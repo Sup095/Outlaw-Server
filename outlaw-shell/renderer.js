@@ -269,7 +269,7 @@ function openPalette() {
 function closePalette() { const pal = document.querySelector('#palette'); if (pal) pal.hidden = true; }
 
 // --- QOL batch: recent apps on the Dashboard ---------------------------------
-const _RECENT_ICONS = { browser: '🌐', steam: '🎮', godot: '🤖', files: '📁', terminal: '>_', lutris: '🍷', blender: '🧊', gimp: '🎨', code: '💻' };
+const _RECENT_ICONS = { browser: '🌐', files: '📁', terminal: '>_', lmstudio: '✦' };
 async function renderRecentApps() {
     const box = document.getElementById('recent-apps');
     const title = document.getElementById('recent-title');
@@ -655,10 +655,10 @@ function renderServices() {
             <td class="mono dim" data-svc-boot="${name}">—</td>
             <td class="dim">${_escapeHtml((u.description || '').slice(0, 70))}</td>
             <td class="right" style="white-space:nowrap;">
-                <button data-svc="${name}" data-svc-action="restart" title="Stop and start it again — the usual fix after a config change">↻</button>
+                <button data-svc="${name}" data-svc-action="restart" aria-label="Restart ${name}" title="Stop and start it again — the usual fix after a config change">↻</button>
                 ${running
-        ? `<button data-svc="${name}" data-svc-action="stop" title="Stop it now">■</button>`
-        : `<button data-svc="${name}" data-svc-action="start" title="Start it now">▶</button>`}
+        ? `<button data-svc="${name}" data-svc-action="stop" aria-label="Stop ${name}" title="Stop it now">■</button>`
+        : `<button data-svc="${name}" data-svc-action="start" aria-label="Start ${name}" title="Start it now">▶</button>`}
             </td>
         </tr>`;
     }).join('');
@@ -753,7 +753,7 @@ async function refreshFirewall() {
         <td class="mono">${_escapeHtml(x.target)}</td>
         <td><span class="badge${x.action === 'ALLOW' ? ' on' : ''}">${_escapeHtml(x.action)}</span></td>
         <td class="dim">${_escapeHtml(x.from || 'Anywhere')}</td>
-        <td class="right"><button class="danger" data-fw-del="${x.num}" title="Delete this rule">✕</button></td>
+        <td class="right"><button class="danger" data-fw-del="${x.num}" aria-label="Delete rule ${x.num} — ${_escapeHtml(x.action)} ${_escapeHtml(x.target)} from ${_escapeHtml(x.from || 'anywhere')}" title="Delete this rule">✕</button></td>
     </tr>`).join('');
 }
 
@@ -902,7 +902,7 @@ async function refreshSshKeys() {
             <span class="dim">${_escapeHtml(k.comment || '(no comment)')}</span>
             ${k.valid ? '' : '<span class="badge" title="This line is not a plain public key — it was not written by this panel.">unrecognised</span>'}
             <span class="spacer"></span>
-            <button class="danger" data-ssh-del="${k.index}" title="Revoke this key">Revoke</button>
+            <button class="danger" data-ssh-del="${k.index}" aria-label="Revoke ${_escapeHtml(k.type)} key ${_escapeHtml(k.comment || 'with no comment')}" title="Revoke this key">Revoke</button>
         </div>`).join('');
 }
 
@@ -990,9 +990,7 @@ async function refreshRemote() {
 // pop over to Apps to install it. Tiles that can NEVER be installed from
 // official repos (e.g. Heroic — AUR only) are intentionally omitted.
 const TILE_GROUPS = {
-    launchers: [['browser', '🌐'], ['steam', '🎮'], ['godot', '🤖'], ['files', '📁'], ['terminal', '>_']],
-    'gaming-apps': [['steam', '🎮'], ['lutris', '🍷']],
-    'gamedev-apps': [['godot', '🤖'], ['blender', '🧊'], ['gimp', '🎨'], ['code', '💻']],
+    launchers: [['terminal', '>_'], ['files', '📁'], ['browser', '🌐']],
 };
 
 async function renderTiles() {
@@ -1018,15 +1016,16 @@ async function renderTiles() {
 // ---------------------------------------------------------------------------
 const CATEGORY_ICONS = {
     'Essentials':   '⭐',
-    'Game Dev':     '🛠',
-    'Gaming':       '🎮',
-    'Browsers':     '🌐',
-    'Productivity': '📑',
+    'Server':       '🗄',
+    'Monitoring':   '📊',
+    'Backup':       '💾',
+    'Network':      '🌐',
+    'Editors':      '📝',
     'Security':     '🛡',
 };
 
 // Built once, then mutated in-place when install state changes. `filter` is
-// either a category name from the catalog ("Game Dev", "Security", …),
+// either a category name from the catalog ("Monitoring", "Security", …),
 // the special tokens "all" / "installed", or an empty search string.
 let _appsState = {
     catalog: [],
@@ -1857,13 +1856,15 @@ function renderHelp(query) {
 }
 
 // ---- Phase 6: first-boot Quickstart tour -----------------------------------
+// The order here is the order things should actually be done on a new machine:
+// lock the door first, then open the one you meant to open.
 const QUICKSTART_STEPS = [
-    { ico: '✦', title: 'Welcome to Outlaw Server', body: '<p>A lightweight Linux built for AI-driven game development. This quick tour shows where everything is — you can <b>Skip</b> at any time.</p>' },
-    { ico: '▣', title: 'Finding your way', body: '<p>The <b>sidebar</b> on the left switches screens — Dashboard, Files, Task Manager, Apps, AI Assistant and more. The top bar shows live CPU/RAM and the clock.</p>' },
-    { ico: '✦', title: 'Private, local AI', body: '<p>Open <b>AI Assistant → Check my PC</b> and Outlaw recommends a model your hardware can run plus the best engine for it — the <b>built-in</b> model (already on), <b>Ollama</b> or <b>LM Studio</b>. It all runs on your machine — no account.</p>' },
-    { ico: '📦', title: 'Apps & games', body: '<p>The <b>Apps</b> page installs Steam, Firefox, Godot and more in one click. The <b>On this PC</b> view finds everything you’ve already installed, including AppImages.</p>' },
-    { ico: '🛠', title: 'Build games', body: '<p>The <b>Dev session</b> (Outlaw CodeMaker) is an AI agent for making Godot games. Switch to it from <b>Settings → Session</b> or the boot greeter.</p>' },
-    { ico: '❔', title: 'Stuck? Open Help', body: '<p>The <b>Help</b> screen explains every part of the OS and how to fix common problems, with a search box. You can replay this tour from there too. Enjoy Outlaw Server!</p>' },
+    { ico: '⛨', title: 'Welcome to Outlaw Server', body: '<p>A stripped-down Linux server you manage from a browser. This quick tour shows where everything is, in the order worth doing it — you can <b>Skip</b> at any time.</p>' },
+    { ico: '🔑', title: 'First: secure the sign-in', body: '<p>Run <code>sudo outlaw passwd</code> to create the administrator. It prints a <b>two-factor secret</b> — add it to a free authenticator app, then confirm it with <code>sudo outlaw 2fa &lt;user&gt; &lt;code&gt;</code>.</p><p>Two-factor isn’t enforced until that confirmation works, so a mistyped secret can’t lock you out.</p>' },
+    { ico: '🔗', title: 'Then: reach it from anywhere', body: '<p><code>sudo outlaw remote up</code> joins a free <b>Tailscale</b> network and prints a sign-in link. <code>sudo outlaw remote bind tunnel</code> moves the panel onto it.</p><p>Now it’s reachable from your laptop — and from nowhere on the open internet.</p>' },
+    { ico: '📦', title: 'Install only what you need', body: '<p><b>Apps</b> installs <b>Docker</b>, <b>Portainer</b> and <b>Cockpit</b> in one click, plus a guided <b>Pterodactyl</b> setup for game servers. A fresh machine ships with none of it, so an idle server runs nothing it wasn’t told to.</p>' },
+    { ico: '🛡', title: 'Open ports on purpose', body: '<p><b>Services</b>, <b>System Log</b> and <b>Firewall</b> are where you run the box day to day. Your game servers need open ports; <b>the control panel never does</b> — it rides the tunnel.</p>' },
+    { ico: '❔', title: 'Stuck? Open Help', body: '<p>The <b>Help</b> screen explains every part of the OS and how to fix common problems, with a search box. You can replay this tour from there too.</p><p>This is <b>alpha</b> software — if something breaks, <b>Settings → Report a problem</b> collects the log for you.</p>' },
 ];
 let _qsIndex = 0;
 
@@ -1899,33 +1900,11 @@ async function maybeShowQuickstart() {
 // ---------------------------------------------------------------------------
 // Live top-bar stats
 // ---------------------------------------------------------------------------
-// Round-2 QOL — battery indicator (laptops; hidden on desktops / no battery).
-let _batTick = 0;
-// QOL — low-battery warnings. One toast per threshold crossing (20% heads-up,
-// 10% urgent), latched so the ~16s battery poll doesn't nag every tick;
-// plugging in (or charging back above the threshold) re-arms them.
-let _batWarned20 = false;
-let _batWarned10 = false;
-async function updateBattery() {
-    const el = $('#stat-battery'); if (!el) return;
-    try {
-        const b = await api.system.battery();
-        if (!b || !b.present) { el.hidden = true; return; }
-        el.hidden = false;
-        el.textContent = (b.charging ? '⚡ ' : '🔋 ') + b.percent + '%';
-        el.title = 'Battery ' + b.percent + '% · ' + b.status;
-        el.classList.toggle('warn-text', !b.charging && b.percent <= 15);
-        if (b.charging || b.percent > 22) _batWarned20 = false;
-        if (b.charging || b.percent > 12) _batWarned10 = false;
-        if (!b.charging && b.percent <= 10 && !_batWarned10) {
-            _batWarned10 = true; _batWarned20 = true;   // the 10% toast covers both
-            toast('🪫 Battery critically low (' + b.percent + '%) — plug in now or the machine may shut off.');
-        } else if (!b.charging && b.percent <= 20 && !_batWarned20) {
-            _batWarned20 = true;
-            toast('🔋 Battery low (' + b.percent + '%) — consider plugging in.');
-        }
-    } catch { el.hidden = true; }
-}
+// The battery indicator went with the rest of the desktop OS, but its ~16s poll
+// stayed behind — calling an api.system.battery that no longer exists, four
+// times a minute, forever, swallowed by a try/catch. Removed: a server has no
+// battery indicator to show, and idle work for a feature that doesn't exist is
+// exactly what "zero idle cost" is supposed to rule out.
 
 function startStats() {
     const tick = async () => {
@@ -1937,7 +1916,6 @@ function startStats() {
             clk.textContent = s.time;
             // QoL — full date on hover.
             try { clk.title = new Date().toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }); } catch {}
-            if (_batTick++ % 8 === 0) updateBattery();   // ~every 16s; first tick fires it
         } catch {}
     };
     tick();
@@ -2410,7 +2388,9 @@ async function sendAI() {
             else { await api.swap.set({ on: res.swap, sizeGb: 4 }); }
         } catch {}
     }
-    if (res.suspend) { try { api.power.suspend(); } catch {} }
+    // No `res.suspend` branch: the daemon no longer emits one (sleep is a
+    // desktop feature this OS doesn't have), and the handler it used to call
+    // was removed with it.
     const t = res.text || '(no answer)';
     addMsg('ai', t);
     recordAiTurn('assistant', t);
@@ -2644,49 +2624,129 @@ if (api && api.on) api.on('job-progress', (p) => {
 // vanish instantly. We hide each <select> and drive it from an inline,
 // DOM-only dropdown (no OS popup) — and dispatch a real 'change' event so all
 // the existing select handlers keep working unchanged.
+// Phase 6 (a11y) — this replaced every native <select> with a button and a list
+// of plain <div>s. Two consequences, both invisible until you stop using a
+// mouse: hiding the <select> threw away its accessible name, so every dropdown
+// announced as an unlabelled button; and the options weren't focusable, so a
+// keyboard user could open a dropdown and then had no way to reach anything in
+// it. It is now a proper combobox — named, arrow-key navigable, Esc to close —
+// using aria-activedescendant so focus never leaves the button.
+let _cselectSeq = 0;
 function enhanceSelects(root) {
     (root || document).querySelectorAll('select:not([data-enhanced])').forEach((sel) => {
         sel.dataset.enhanced = '1';
         sel.style.display = 'none';
+        // Carry the name across before the <select> disappears from the a11y tree.
+        const accName = sel.getAttribute('aria-label')
+            || (sel.labels && sel.labels.length ? (sel.labels[0].innerText || '').trim() : '')
+            || sel.getAttribute('title') || '';
+        sel.setAttribute('aria-hidden', 'true');
+        sel.tabIndex = -1;
+
+        const uid = 'cselect-' + (++_cselectSeq);
         const wrap = document.createElement('div');
         wrap.className = 'cselect';
         wrap.style.minWidth = sel.style.minWidth || '160px';
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'cselect-btn';
+        btn.id = uid + '-btn';
+        btn.setAttribute('role', 'combobox');
+        btn.setAttribute('aria-haspopup', 'listbox');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.setAttribute('aria-controls', uid + '-list');
+        if (accName) btn.setAttribute('aria-label', accName);
         const list = document.createElement('div');
         list.className = 'cselect-list';
+        list.id = uid + '-list';
+        list.setAttribute('role', 'listbox');
+        if (accName) list.setAttribute('aria-label', accName);
         list.hidden = true;
+
+        const items = () => [...list.querySelectorAll('.cselect-opt')];
+        let activeIdx = -1;
 
         const sync = () => {
             const o = sel.options[sel.selectedIndex];
             btn.textContent = o ? o.textContent : '';
-            list.querySelectorAll('.cselect-opt').forEach((it) =>
-                it.classList.toggle('active', it.dataset.value === sel.value));
+            items().forEach((it) => {
+                const on = it.dataset.value === sel.value;
+                it.classList.toggle('active', on);
+                it.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
         };
-        [...sel.options].forEach((o) => {
+        const setActive = (i) => {
+            const list_ = items();
+            if (!list_.length) return;
+            activeIdx = Math.max(0, Math.min(list_.length - 1, i));
+            list_.forEach((it, n) => it.classList.toggle('kb', n === activeIdx));
+            btn.setAttribute('aria-activedescendant', list_[activeIdx].id);
+            try { list_[activeIdx].scrollIntoView({ block: 'nearest' }); } catch { /* older engines */ }
+        };
+        const setOpen = (open) => {
+            list.hidden = !open;
+            wrap.classList.toggle('open', open);
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) { sync(); setActive(sel.selectedIndex >= 0 ? sel.selectedIndex : 0); }
+            else {
+                btn.removeAttribute('aria-activedescendant');
+                items().forEach((it) => it.classList.remove('kb'));
+            }
+        };
+        const choose = (i) => {
+            const o = sel.options[i];
+            if (!o) return;
+            sel.value = o.value;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            sync();
+            setOpen(false);
+            btn.focus();
+        };
+        // The document-level "click anywhere closes dropdowns" handler needs to
+        // reset aria-expanded too, so give it the real closer rather than
+        // letting it poke at classes behind this component's back.
+        wrap._setOpen = setOpen;
+
+        [...sel.options].forEach((o, i) => {
             const item = document.createElement('div');
             item.className = 'cselect-opt';
+            item.id = uid + '-opt-' + i;
+            item.setAttribute('role', 'option');
+            item.setAttribute('aria-selected', 'false');
             item.textContent = o.textContent;
             item.dataset.value = o.value;
-            item.addEventListener('click', (e) => {
-                e.stopPropagation();
-                sel.value = o.value;
-                sel.dispatchEvent(new Event('change', { bubbles: true }));
-                sync();
-                list.hidden = true; wrap.classList.remove('open');
-            });
+            item.addEventListener('click', (e) => { e.stopPropagation(); choose(i); });
+            item.addEventListener('mouseenter', () => setActive(i));
             list.appendChild(item);
         });
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const willOpen = list.hidden;
             document.querySelectorAll('.cselect.open').forEach((w) => {
-                if (w !== wrap) { w.classList.remove('open'); w.querySelector('.cselect-list').hidden = true; }
+                if (w !== wrap && w._setOpen) w._setOpen(false);
             });
-            list.hidden = !willOpen;
-            wrap.classList.toggle('open', willOpen);
-            if (willOpen) sync();
+            setOpen(willOpen);
+        });
+        btn.addEventListener('keydown', (e) => {
+            const open = !list.hidden;
+            switch (e.key) {
+                case 'ArrowDown':
+                    e.preventDefault(); if (open) setActive(activeIdx + 1); else setOpen(true); break;
+                case 'ArrowUp':
+                    e.preventDefault(); if (open) setActive(activeIdx - 1); else setOpen(true); break;
+                case 'Home': if (open) { e.preventDefault(); setActive(0); } break;
+                case 'End': if (open) { e.preventDefault(); setActive(items().length - 1); } break;
+                // preventDefault also suppresses the click these would synthesize,
+                // so the dropdown can't toggle twice on one keypress.
+                case 'Enter': case ' ':
+                    e.preventDefault(); if (open) choose(activeIdx); else setOpen(true); break;
+                case 'Escape':
+                    // Only swallow Esc when there is actually a dropdown to close,
+                    // or it would eat the key the rest of the UI expects.
+                    if (open) { e.preventDefault(); e.stopPropagation(); setOpen(false); } break;
+                case 'Tab': if (open) setOpen(false); break;
+                default: break;
+            }
         });
         sel.after(wrap);
         wrap.append(btn, list);
@@ -2703,6 +2763,7 @@ function enhanceSelects(root) {
 // Any click outside an open dropdown closes it.
 document.addEventListener('click', () => {
     document.querySelectorAll('.cselect.open').forEach((w) => {
+        if (w._setOpen) { w._setOpen(false); return; }
         w.classList.remove('open'); w.querySelector('.cselect-list').hidden = true;
     });
 });
@@ -3023,38 +3084,35 @@ async function storageClean() {
 const ROADMAP = [
     {
         title: 'Shipped & solid', tag: 'done', open: false,
-        blurb: 'Six completed roadmaps — the OS core, the AI stack, and the desktop feature set.',
+        blurb: 'Phases 0–5 — a bootable server OS with a control panel, a way in from anywhere, and the tools to run it.',
         items: [
-            ['done', 'Product merge · Reliability · System Core · release & boot hardening · updates/channels'],
-            ['done', 'Completeness & Polish — all 7 v2.1 phases: themes, apps-found, task manager, help + quickstart, reviewer, boot splash + pre-flight, driver profiles'],
-            ['done', 'Dev session rebuild (Outlaw CodeMaker) + AI Assistant overhaul — Cr1tt3r + V4rm1nt, persistent chats, smart installer'],
-            ['done', 'Three AI engines — built-in (default) / Ollama / LM Studio — incl. AMD + Intel GPU support'],
-            ['done', 'Hardening & capability — safeguarded AI system control, updater overhaul, storage-as-RAM, background-AI notifications, AI personalities, offline mode, one combined error log'],
-            ['done', 'Full-fledged desktop — sleep, notifications + history + Do Not Disturb, USB auto-mount, Bluetooth, time zone & keyboard layout, night light, auto-lock, screen-blank + sleep-when-idle'],
-            ['done', 'Everyday polish — quick settings (☰), command palette (Ctrl+Space), calendar, recent apps, full keyboard access, high contrast, the Broken theme’s live faults'],
+            ['done', '0 · Fork & strip — the desktop OS cut down to a bare-bones server OS'],
+            ['done', '1 · Headless daemon — outlaw-serverd; the UI itself is optional (panel / lean mode)'],
+            ['done', '2 · Sign-in that means it — password (scrypt) + TOTP 2FA, revocable sessions, per-address lockout, audit log'],
+            ['done', '3 · Remote access — Tailscale/WireGuard only; LAN, public and wildcard binds are refused outright'],
+            ['done', '4 · Server toolset — services, journal viewer, firewall, SSH keys and storage, from either frontend'],
+            ['done', '5 · Game servers — one-click Docker, Portainer and Cockpit, plus a guided Pterodactyl install'],
         ],
     },
     {
-        title: 'Release readiness — the road to v2.1.0', tag: 'now', open: true,
-        blurb: 'Test on real hardware, fix, repeat — until the bugs are gone, then v2.1.0.',
+        title: 'Polish & first install', tag: 'now', open: true,
+        blurb: 'Phase 6 — the last one before this stops being alpha.',
         items: [
-            ['now', 'Real-hardware test passes over the new desktop features'],
-            ['now', 'Boot crash-loops — diagnosing via the error log (Report a problem)'],
-            ['now', 'Hotswap second-reboot'],
-            ['plan', 'Display settings + screen brightness (need careful hardware testing — a wrong mode can blank a screen)'],
-            ['plan', 'Scope calls — printing, multi-user accounts'],
+            ['now', 'Accessibility pass — full keyboard reach, focus order, screen-reader labels'],
+            ['now', 'Docs — help topics that describe THIS OS rather than the desktop it was forked from'],
+            ['now', 'The first real-hardware test. Nothing in phases 4–5 has run on Linux yet'],
+            ['plan', 'Fix whatever that test finds'],
         ],
     },
     {
-        title: 'Post-1.0', tag: 'exp', open: false,
-        blurb: 'The long-term direction once v2.1.0 is stable.',
+        title: 'Experimental — after the roadmap', tag: 'exp', open: false,
+        blurb: 'Direction, not promises. Nothing here is started, and any of it may change shape or be dropped.',
         items: [
-            ['exp', 'Publish your games — Steam / itch.io pipelines from CodeMaker'],
-            ['exp', 'AI builds more of the game — templates, playtest-fix loop, asset generation'],
-            ['exp', 'Runs anywhere — model auto-management, Lite edition, backups, translations'],
-            ['exp', 'Smarter AI — Godot-docs retrieval, multi-agent, learns your style'],
-            ['exp', 'Reliability — boot CI, recovery shell, crash reporting'],
-            ['exp', 'Slow-but-light AI · self-update service (feasibility)'],
+            ['exp', '🐕‍🦺 Watchdog — a small local AI that watches logs, auth attempts and processes for threats'],
+            ['exp', '🦮 Guard Dog — a second, independent AI that verifies what Watchdog found and proposes responses'],
+            ['exp', 'Two models, because each has to survive the other’s review before anything reaches you'],
+            ['exp', 'You stay in charge — anything above a low-level threat is a message and a list of options, never a silent action'],
+            ['exp', 'Both boxed in Docker, and sized to whatever GPU (or CPU) this machine actually has'],
         ],
     },
 ];
@@ -3208,7 +3266,6 @@ function wire() {
             case 'lock': lockNow(); break;
             case 'reboot': closePower(); api.power.reboot(); break;
             case 'shutdown': closePower(); api.power.shutdown(); break;
-            case 'sleep': closePower(); api.power.suspend().then((r) => { if (r && r.ok === false) toast('Sleep failed: ' + (r.error || 'try again')); }).catch(() => {}); break;
             case 'stability-works':  setStabilityVote('works'); break;
             case 'stability-broken': setStabilityVote('broken'); break;
             case 'stability-refresh': refreshStabilityTally(); break;
@@ -3349,27 +3406,15 @@ function wire() {
         });
     }
 
-    // Phase 14d: AI setup guide — purpose-aware (dev vs desktop) recommendation.
-    const aiPurpose = $('#ai-purpose');
-    const aiTierWrap = $('#ai-tier-wrap');
-    const aiSpillWrap = $('#ai-spill-wrap');
-    const syncAiPurposeUi = () => {
-        const dev = aiPurpose && aiPurpose.value === 'dev';
-        if (aiTierWrap) aiTierWrap.style.display = dev ? 'none' : '';
-        if (aiSpillWrap) aiSpillWrap.style.display = dev ? 'inline-flex' : 'none';
-    };
-    if (aiPurpose) { aiPurpose.addEventListener('change', syncAiPurposeUi); syncAiPurposeUi(); }
-
     const checkPcBtn = $('#ai-check-pc');
     if (checkPcBtn) {
         checkPcBtn.addEventListener('click', async () => {
             const out = $('#ai-setup-result');
             if (out) out.innerHTML = '<span class="muted">Reading your hardware…</span>';
-            const opts = {
-                purpose: aiPurpose ? aiPurpose.value : 'desktop',
-                tier: ($('#ai-tier') || {}).value || 'powerful',
-                spill: !!($('#ai-spill') && $('#ai-spill').checked),
-            };
+            // There is only one purpose here now — the dev-session ("coding
+            // model") path went with the rest of the desktop OS. 'desktop' is
+            // the backend's name for the general-instruct catalogue.
+            const opts = { purpose: 'desktop', tier: ($('#ai-tier') || {}).value || 'powerful' };
             try {
                 renderAiRecommendation(await api.ai.recommend(opts));
                 // #2 — fill in the plain-language AI take async (best-effort; the

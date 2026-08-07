@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld('outlaw', {
         kill: (pid) => ipcRenderer.invoke('proc:kill', pid),
         killTree: (pid) => ipcRenderer.invoke('proc:kill-tree', pid),
         gpu: () => ipcRenderer.invoke('system:gpu'),
+        // Task Manager's GPU/VRAM bar calls this. Its entry was dropped during
+        // the fork while the caller and the main-process handler both stayed,
+        // so the bar silently never updated.
+        gpuDetailed: () => ipcRenderer.invoke('system:gpu-detailed'),
         disk: () => ipcRenderer.invoke('system:disk'),
         net: () => ipcRenderer.invoke('system:net'),
         // Returns {live: bool, dismissed: bool}. Drives the live-ISO welcome
@@ -174,6 +178,10 @@ contextBridge.exposeInMainWorld('outlaw', {
         wifiList: () => ipcRenderer.invoke('net:wifi-list'),
         wifiConnect: (ssid, password) => ipcRenderer.invoke('net:wifi-connect', { ssid, password }),
         wifiForget: (ssid) => ipcRenderer.invoke('net:wifi-forget', ssid),
+        // Same story as system.gpuDetailed: the Settings toggle and the main
+        // handler survived the fork, only the bridge between them was missing.
+        airplaneStatus: () => ipcRenderer.invoke('net:airplane-status'),
+        setAirplane: (on) => ipcRenderer.invoke('net:airplane-set', on),
     },
 
     // --- Health diagnostics --------------------------------------------------

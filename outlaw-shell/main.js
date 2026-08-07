@@ -362,21 +362,22 @@ let settings = loadSettings();
 // Allowlisted application launchers
 // The renderer can only ask for an *id*; it can never name an arbitrary binary.
 // ---------------------------------------------------------------------------
+// Phase 6 — launchable GUI apps, for the case where someone is sitting at the
+// machine with a monitor plugged in. Kept deliberately short: the desktop-OS
+// entries (Steam, Godot, Blender, GIMP, Lutris, Heroic, OBS, Burp) were removed
+// because nothing on a server can launch them and the AI was still offering to.
+// `browser` earns its place — the Tailscale sign-in is a URL you have to open,
+// and at a fresh console this may be the only browser you have.
+// These are launched DETACHED, with no terminal attached — so only GUI programs
+// belong here. A TUI like btop would spawn without a tty and silently do
+// nothing; install it from the Apps catalog and run it in the Terminal instead.
 const APP_REGISTRY = {
-    browser:   { label: 'Web Browser',  bin: 'opera',          args: [], fallbacks: ['opera-gx', 'firefox', 'chromium'] },
-    steam:     { label: 'Steam',        bin: 'steam',          args: [] },
-    lutris:    { label: 'Lutris',       bin: 'lutris',         args: [] },
-    heroic:    { label: 'Heroic',       bin: 'heroic',         args: [] },
-    godot:     { label: 'Godot',        bin: 'godot',          args: [] },
-    blender:   { label: 'Blender',      bin: 'blender',        args: [] },
-    gimp:      { label: 'GIMP',         bin: 'gimp',           args: [] },
-    code:      { label: 'VS Code',      bin: 'code',           args: [], fallbacks: ['code-oss', 'codium'] },
+    browser:   { label: 'Web Browser',  bin: 'firefox',        args: [], fallbacks: ['chromium', 'opera'] },
     files:     { label: 'Files',        bin: 'thunar',         args: [], fallbacks: ['pcmanfm', 'nautilus'] },
-    lmstudio:  { label: 'LM Studio',    bin: 'outlaw-lm-studio', args: [], fallbacks: ['lm-studio', 'lmstudio'] },
-    wireshark: { label: 'Wireshark',    bin: 'wireshark',      args: [] },
-    burp:      { label: 'Burp Suite',   bin: 'burpsuite',      args: [] },
-    obs:       { label: 'OBS Studio',   bin: 'obs',            args: [] },
     terminal:  { label: 'Terminal',     bin: 'xfce4-terminal', args: [], fallbacks: ['xterm', 'alacritty'] },
+    // Still a supported AI engine — the "Get / Open LM Studio" button launches
+    // this id, so it must stay even though it isn't a server tool.
+    lmstudio:  { label: 'LM Studio',    bin: 'outlaw-lm-studio', args: [], fallbacks: ['lm-studio', 'lmstudio'] },
 };
 
 // ---------------------------------------------------------------------------
@@ -387,49 +388,55 @@ const APP_REGISTRY = {
 // so no AUR helper is required. The renderer can ONLY ask to install by `id`;
 // it can never name an arbitrary package — the catalog IS the allowlist.
 // ---------------------------------------------------------------------------
+// Phase 6 — this list was inherited wholesale from the desktop OS and offered a
+// one-click "Steam + gaming stack" (32-bit Vulkan libs and all) on a machine
+// whose entire premise is that the desktop was stripped out. Everything here is
+// now something you would plausibly want ON A SERVER, and nothing pulls a
+// graphics stack. Docker/Portainer/Cockpit are NOT here — they have their own
+// managed lifecycle in ops.js (install/remove/stop) rather than a raw pacman
+// install, and duplicating them would give two paths that disagree.
 const APP_CATALOG = [
-    // ----- Essentials (the first-boot bundles, also installable here any time
-    // if you skipped them on first login). `extra` packages install alongside
-    // the primary `pkg`; install-state is tracked on `pkg`. -----
-    { id: 'steam',       pkg: 'steam',             category: 'Essentials',   label: 'Steam + gaming stack', description: 'Steam client plus GameMode, Gamescope, MangoHud and the Vulkan / 32-bit gaming libraries.', bin: 'steam',
-      extra: ['gamemode', 'lib32-gamemode', 'gamescope', 'mangohud', 'lib32-mangohud', 'vulkan-icd-loader', 'lib32-vulkan-icd-loader', 'vulkan-tools', 'lib32-mesa'] },
-    { id: 'firefox',     pkg: 'firefox',           category: 'Essentials',   label: 'Firefox',         description: 'The Firefox web browser.',                                        bin: 'firefox' },
-    { id: 'godot',       pkg: 'godot',             category: 'Essentials',   label: 'Godot Engine',    description: 'The Godot game engine (GDScript) — what Outlaw CodeMaker builds games in.', bin: 'godot' },
+    // ----- Essentials — the ones worth having on any box -----
+    { id: 'btop',        pkg: 'btop',              category: 'Essentials',   label: 'btop',            description: 'A far nicer top: processes, CPU, memory, disks and network on one screen.', bin: 'btop' },
+    { id: 'tmux',        pkg: 'tmux',              category: 'Essentials',   label: 'tmux',            description: 'Keep a shell running after you disconnect — essential over SSH.' },
+    { id: 'rsync',       pkg: 'rsync',             category: 'Essentials',   label: 'rsync',           description: 'Copy and sync files/folders, locally or over SSH. Resumes where it left off.' },
+    { id: 'git',         pkg: 'git',               category: 'Essentials',   label: 'Git',             description: 'Version control — also how most server configs get deployed.' },
 
-    // ----- Game Dev -----
-    { id: 'blender',     pkg: 'blender',           category: 'Game Dev',     label: 'Blender',         description: '3D modeling, rigging, animation, and sculpting.',                 bin: 'blender' },
-    { id: 'gimp',        pkg: 'gimp',              category: 'Game Dev',     label: 'GIMP',            description: 'Raster image editor for sprites and textures.',                   bin: 'gimp' },
-    { id: 'code',        pkg: 'code',              category: 'Game Dev',     label: 'VS Code',         description: 'Code editor with extensions. Pairs well with GDScript.',          bin: 'code' },
-    { id: 'krita',       pkg: 'krita',             category: 'Game Dev',     label: 'Krita',           description: 'Digital painting for concept art and 2D animation.',              bin: 'krita' },
-    { id: 'inkscape',    pkg: 'inkscape',          category: 'Game Dev',     label: 'Inkscape',        description: 'Vector editor for UI and SVG assets.',                            bin: 'inkscape' },
-    { id: 'audacity',    pkg: 'audacity',          category: 'Game Dev',     label: 'Audacity',        description: 'Audio editor for SFX and music.',                                 bin: 'audacity' },
-    { id: 'tiled',       pkg: 'tiled',             category: 'Game Dev',     label: 'Tiled',           description: 'Tilemap editor — great for 2D level design.',                     bin: 'tiled' },
+    // ----- Server software (databases, web servers, caches) -----
+    { id: 'nginx',       pkg: 'nginx',             category: 'Server',       label: 'nginx',           description: 'Web server and reverse proxy. Put it in front of a service to give it a hostname.' },
+    { id: 'caddy',       pkg: 'caddy',             category: 'Server',       label: 'Caddy',           description: 'Web server that gets and renews HTTPS certificates for you. Simpler than nginx.' },
+    { id: 'mariadb',     pkg: 'mariadb',           category: 'Server',       label: 'MariaDB',         description: 'The MySQL-compatible database. What Pterodactyl uses.' },
+    { id: 'postgresql',  pkg: 'postgresql',        category: 'Server',       label: 'PostgreSQL',      description: 'A heavier-duty relational database.' },
+    { id: 'redis',       pkg: 'redis',             category: 'Server',       label: 'Redis',           description: 'In-memory cache / queue. Often required by web panels.' },
+    { id: 'sqlite',      pkg: 'sqlite',            category: 'Server',       label: 'SQLite',          description: 'A whole database in a single file. No server to run.' },
 
-    // ----- Gaming -----
-    { id: 'lutris',      pkg: 'lutris',            category: 'Gaming',       label: 'Lutris',          description: 'Non-Steam game launcher (GOG, Epic, emulators).',                 bin: 'lutris' },
-    { id: 'wine',        pkg: 'wine',              category: 'Gaming',       label: 'Wine',            description: 'Run Windows games and apps on Linux.' },
-    { id: 'winetricks',  pkg: 'winetricks',        category: 'Gaming',       label: 'Winetricks',      description: 'Workarounds + components for Wine.' },
-    { id: 'discord',     pkg: 'discord',           category: 'Gaming',       label: 'Discord',         description: 'Voice and text chat.',                                            bin: 'discord' },
+    // ----- Monitoring & disk -----
+    { id: 'htop',        pkg: 'htop',              category: 'Monitoring',   label: 'htop',            description: 'The classic interactive process viewer.',                         bin: 'htop' },
+    { id: 'ncdu',        pkg: 'ncdu',              category: 'Monitoring',   label: 'ncdu',            description: 'Find what is eating the disk, by folder. The first tool to reach for when it fills up.', bin: 'ncdu' },
+    { id: 'iotop',       pkg: 'iotop',             category: 'Monitoring',   label: 'iotop',           description: 'Which process is hammering the disk.' },
+    { id: 'smartmon',    pkg: 'smartmontools',     category: 'Monitoring',   label: 'smartmontools',   description: 'Read a drive\'s SMART health. Tells you a disk is dying BEFORE it does.' },
+    { id: 'sensors',     pkg: 'lm_sensors',        category: 'Monitoring',   label: 'lm_sensors',      description: 'Temperatures and fan speeds — worth watching on a box that never sleeps.' },
 
-    // ----- Browsers -----
-    { id: 'chromium',    pkg: 'chromium',          category: 'Browsers',     label: 'Chromium',        description: 'Alternative to Firefox.',                                         bin: 'chromium' },
+    // ----- Backup -----
+    { id: 'restic',      pkg: 'restic',            category: 'Backup',       label: 'restic',          description: 'Encrypted, deduplicated backups to a disk or remote. Verify them; a backup you have never restored is a rumour.' },
+    { id: 'borg',        pkg: 'borg',              category: 'Backup',       label: 'BorgBackup',      description: 'Deduplicating backups with compression. Well suited to daily snapshots of game-server data.' },
 
-    // ----- Productivity / utilities -----
-    { id: 'vim',         pkg: 'vim',               category: 'Productivity', label: 'Vim',             description: 'Modal terminal text editor.' },
-    { id: 'vlc',         pkg: 'vlc',               category: 'Productivity', label: 'VLC',             description: 'Media player.',                                                   bin: 'vlc' },
-    { id: 'libreoffice', pkg: 'libreoffice-fresh', category: 'Productivity', label: 'LibreOffice',     description: 'Documents, spreadsheets, presentations.',                         bin: 'libreoffice' },
-    { id: 'obs',         pkg: 'obs-studio',        category: 'Productivity', label: 'OBS Studio',      description: 'Screen recording / streaming.',                                   bin: 'obs' },
+    // ----- Network -----
+    { id: 'bind',        pkg: 'bind',              category: 'Network',      label: 'dig + host',      description: 'DNS lookup tools. First thing to reach for when a name will not resolve.' },
+    { id: 'mtr',         pkg: 'mtr',               category: 'Network',      label: 'mtr',             description: 'Traceroute and ping combined — shows WHERE a connection is losing packets.' },
+    { id: 'socat',       pkg: 'socat',             category: 'Network',      label: 'socat',           description: 'Relay data between sockets, files and processes.' },
+    { id: 'iperf3',      pkg: 'iperf3',            category: 'Network',      label: 'iperf3',          description: 'Measure the actual bandwidth between two machines.' },
+    { id: 'netcat',      pkg: 'gnu-netcat',        category: 'Network',      label: 'netcat',          description: 'Network swiss-army knife. Handy for "is that port actually open?".' },
 
-    // ----- Security (authorized testing only) -----
-    { id: 'nmap',        pkg: 'nmap',              category: 'Security',     label: 'Nmap',            description: 'Network scanning.' },
-    { id: 'wireshark',   pkg: 'wireshark-qt',      category: 'Security',     label: 'Wireshark',       description: 'Packet capture and analysis.',                                    bin: 'wireshark' },
+    // ----- Editors -----
+    { id: 'vim',         pkg: 'vim',               category: 'Editors',      label: 'Vim',             description: 'Modal terminal text editor.' },
+    { id: 'nano',        pkg: 'nano',              category: 'Editors',      label: 'nano',            description: 'A terminal editor you can use without learning anything first.' },
+
+    // ----- Security -----
+    { id: 'fail2ban',    pkg: 'fail2ban',          category: 'Security',     label: 'fail2ban',        description: 'Watches logs and bans addresses that keep failing to log in. Worth having on anything reachable.' },
+    { id: 'lynis',       pkg: 'lynis',             category: 'Security',     label: 'Lynis',           description: 'Audits this machine\'s security setup and tells you what to tighten.' },
+    { id: 'nmap',        pkg: 'nmap',              category: 'Security',     label: 'Nmap',            description: 'Network scanning — check what YOUR box is actually exposing.' },
     { id: 'tcpdump',     pkg: 'tcpdump',           category: 'Security',     label: 'tcpdump',         description: 'CLI packet capture.' },
-    { id: 'john',        pkg: 'john',              category: 'Security',     label: 'John the Ripper', description: 'Password cracker (CPU).' },
-    { id: 'hashcat',     pkg: 'hashcat',           category: 'Security',     label: 'Hashcat',         description: 'Password cracker (GPU).' },
-    { id: 'sqlmap',      pkg: 'sqlmap',            category: 'Security',     label: 'sqlmap',          description: 'SQL injection testing.' },
-    { id: 'aircrack',    pkg: 'aircrack-ng',       category: 'Security',     label: 'Aircrack-ng',     description: 'Wireless network security testing.' },
-    { id: 'hydra',       pkg: 'hydra',             category: 'Security',     label: 'Hydra',           description: 'Network login brute-force.' },
-    { id: 'netcat',      pkg: 'gnu-netcat',        category: 'Security',     label: 'netcat',          description: 'Network swiss-army knife.' },
 ];
 
 function which(bin) {
@@ -864,9 +871,8 @@ function settingsSummary() {
         + (aiEngine() === 'ollama' ? `Ollama model: ${settings.ollamaModel || '(none)'}; ` : '')
         + `theme: ${settings.theme || 'system'}; `
         + `CRT: ${onoff(settings.crtFx)}; glow: ${onoff(settings.glow)}; `
-        + `reduce motion: ${onoff(settings.reduceMotion)}; text size: ${settings.uiScale || 1}; `
-        + `VRAM saver: ${settings.vramSaverMode || 'auto'}; performance mode: ${onoff(settings.performanceMode)}; `
-        + `update checks: ${onoff(settings.autoCheck)}; voice: ${onoff(settings.coreVoiceEnabled)}.`;
+        + `reduce motion: ${onoff(settings.reduceMotion)}; high contrast: ${onoff(settings.highContrast)}; `
+        + `text size: ${settings.uiScale || 1}; update checks: ${onoff(settings.autoCheck)}.`;
 }
 
 // Phase 13.2 / 16 — which local AI backend the desktop uses right now. Three
@@ -1001,11 +1007,9 @@ const AI_SETTABLE = {
     crtFx: { bool: true },
     glow: { bool: true },
     reduceMotion: { bool: true },
-    performanceMode: { bool: true },
-    vramSaverMode: { values: ['auto', 'off', 'lean', 'minimal'] },
+    highContrast: { bool: true },
     aiEngine: { values: ['base', 'lmstudio', 'ollama'] },
     autoCheck: { bool: true },
-    coreVoiceEnabled: { bool: true },
     uiScale: { values: ['0.9', '1', '1.15', '1.3'] },
 };
 
@@ -1033,8 +1037,8 @@ const _AI_VALUE_TO_KEY = (() => {
 // AI_SETTABLE above) — used in the "couldn't apply that" message so the user/AI
 // learns the exact accepted values instead of a vague rejection.
 const AI_SETTABLE_HELP = 'theme=green|gold|broken, uiScale=0.9|1|1.15|1.3, '
-    + 'crtFx/glow/reduceMotion/performanceMode/autoCheck/coreVoiceEnabled=on|off, '
-    + 'vramSaverMode=auto|off|lean|minimal, aiEngine=base|lmstudio|ollama';
+    + 'crtFx/glow/reduceMotion/highContrast/autoCheck=on|off, '
+    + 'aiEngine=base|lmstudio|ollama';
 
 function parseSettingChange(arg) {
     // Accepts one OR MORE "key=value" pairs (the model sometimes batches them,
@@ -1064,9 +1068,11 @@ function parseSettingChange(arg) {
     return Object.keys(patch).length ? patch : null;
 }
 
-// QoL — screens the AI may navigate to for the user (matches the sidebar).
-const AI_SCREENS = ['dashboard', 'syscore', 'files', 'tasks', 'terminal',
-    'gaming', 'gamedev', 'apps', 'ai', 'calc', 'settings', 'help'];
+// QoL — screens the AI may navigate to for the user. MUST match the sidebar in
+// index.html: an id listed here that no longer exists sends the user to a blank
+// screen, and one that's missing makes the AI insist it can't go there.
+const AI_SCREENS = ['dashboard', 'files', 'services', 'logs', 'firewall',
+    'remote', 'tasks', 'terminal', 'apps', 'ai', 'settings', 'help'];
 
 async function executeIntent(intent) {
     switch (intent.tool) {
@@ -1156,28 +1162,21 @@ async function executeIntent(intent) {
             // wired toggles, which update the UI + show confirms where appropriate).
             const a = String(intent.arg || '').trim().toLowerCase();
             switch (a) {
-                case 'lock': return { did: 'system_action', lockScreen: true, text: intent.text || 'Locking the screen.' };
-                case 'sleep': return { did: 'system_action', suspend: true, text: intent.text || 'Going to sleep — press a key or the power button to wake.' };
+                case 'lock': return { did: 'system_action', lockScreen: true, text: intent.text || 'Locking the panel.' };
                 case 'airplane_on': return { did: 'system_action', airplane: true, text: intent.text || 'Airplane mode on — radios off.' };
                 case 'airplane_off': return { did: 'system_action', airplane: false, text: intent.text || 'Airplane mode off.' };
                 case 'storage_ram_on': return { did: 'system_action', swap: true, text: intent.text || 'Setting up storage as extra memory…' };
                 case 'storage_ram_off': return { did: 'system_action', swap: false, text: intent.text || 'Turning off storage-as-memory.' };
-                case 'night_light_on': case 'night_light_off': {
-                    const on = a === 'night_light_on';
-                    if (IS_LINUX && on) {
-                        const have = await runShell('command -v gammastep >/dev/null 2>&1 && echo yes', { timeout: 3000 });
-                        if (!/yes/.test(have.stdout || '')) return { did: 'system_action', text: 'Night light needs the gammastep package, which isn\'t installed yet.' };
-                    }
-                    applyNightLight(on, settings.nightLightTemp);
-                    settings = saveSettings({ ...settings, nightLight: on });
-                    return { did: 'system_action', text: intent.text || ('Night light ' + (on ? 'on — warmer colors.' : 'off.')) };
-                }
-                case 'dnd_on': case 'dnd_off': {
-                    const on = a === 'dnd_on';
-                    applyDnd(on);
-                    settings = saveSettings({ ...settings, dnd: on });
-                    return { did: 'system_action', text: intent.text || (on ? 'Do Not Disturb on — notifications paused.' : 'Do Not Disturb off.') };
-                }
+                // Sleep, night light and Do Not Disturb were stripped with the rest
+                // of the desktop. They stayed reachable here long after the renderer
+                // stopped acting on them, so the AI would cheerfully report "going to
+                // sleep" and nothing whatsoever would happen — the exact "claimed an
+                // action that didn't occur" failure its own prompt forbids.
+                case 'sleep':
+                    return { did: 'none', text: 'This is a server — it has no sleep/suspend. If you want it off, shut it down properly so services stop cleanly.' };
+                case 'night_light_on': case 'night_light_off':
+                case 'dnd_on': case 'dnd_off':
+                    return { did: 'none', text: 'That\'s a desktop feature and isn\'t part of Outlaw Server.' };
                 case 'report_problem':
                     return { did: 'system_action', openReport: true, text: intent.text || 'Opening the problem reporter — collect the log and send it.' };
                 case 'check_updates': {
@@ -1196,7 +1195,7 @@ async function executeIntent(intent) {
                         return { did: 'system_action', text: 'Update check failed — ' + ((e && e.message) || e) + ' (are you online?)' };
                     }
                 }
-                default: return { did: 'none', text: 'I can lock the screen, sleep, toggle airplane mode, night light, Do Not Disturb, or storage-as-memory, or check for updates — which one?' };
+                default: return { did: 'none', text: 'I can lock the panel, toggle airplane mode or storage-as-memory, check for updates, or open the problem reporter — which one?' };
             }
         }
         case 'install_app': {

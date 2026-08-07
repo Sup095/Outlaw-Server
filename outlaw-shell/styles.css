@@ -367,6 +367,11 @@ body.live-mode input:disabled { opacity: .35; }
 .cselect-opt { padding: 9px 12px; cursor: pointer; white-space: nowrap; color: var(--text); }
 .cselect-opt:hover { background: rgba(var(--term-rgb), 0.10); color: var(--term); }
 .cselect-opt.active { color: var(--term); border-left: 2px solid var(--term); padding-left: 10px; }
+/* Keyboard cursor inside an open dropdown. Focus stays on the button
+   (aria-activedescendant), so without this there is nothing on screen telling a
+   keyboard user which option the arrow keys are actually on. */
+.cselect-opt.kb { background: rgba(var(--term-rgb), 0.16); color: var(--term); outline: 1px solid var(--term); outline-offset: -1px; }
+body.high-contrast .cselect-opt.kb { background: var(--term); color: #000; outline-width: 2px; }
 
 /* ---- Network & Wi-Fi (Settings card + topbar offline pill) ---- */
 .offline-pill {

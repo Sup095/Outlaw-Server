@@ -8,507 +8,589 @@
 // Bodies are trusted, author-written HTML (simple tags only). Keep them short
 // and practical. To add a topic: append an object; `cat` should match one of
 // OUTLAW_HELP_CATS (new categories appear at the end).
+//
+// RULE: every topic here must describe something this OS actually does. A help
+// database that documents features which were stripped out is worse than no
+// help at all — it sends people looking for buttons that don't exist.
 // ============================================================================
 window.OUTLAW_HELP_CATS = [
-    'Getting started', 'The desktop', 'Apps & games', 'AI',
-    'Dev session', 'System tools', 'Settings & updates', 'Troubleshooting',
+    'Getting started', 'The panel', 'Remote access', 'Server software',
+    'System tools', 'Settings & updates', 'Troubleshooting',
 ];
 
 window.OUTLAW_HELP = [
     // ---- Getting started ---------------------------------------------------
     {
         id: 'what-is', cat: 'Getting started', title: 'What is Outlaw Server?',
-        keywords: 'overview about intro what outlaw os godot ai',
-        body: '<p><b>Outlaw Server</b> is a lightweight, security-minded Linux desktop built for '
-            + 'AI-driven game development with <b>Godot</b>. It has two sides: the <b>Desktop</b> '
-            + '(this shell — apps, games, AI assistant, system tools) and the <b>Dev session</b> '
-            + '(<b>Outlaw CodeMaker</b>, an AI agent that helps you build games). You pick which '
-            + 'one to open at the boot greeter.</p>',
+        keywords: 'overview about intro what outlaw server linux arch headless',
+        body: '<p><b>Outlaw Server</b> is a stripped-down, security-minded Linux server OS you '
+            + 'manage from a web browser. One box, one job: run your servers — game servers '
+            + 'first — and make managing them painless.</p>'
+            + '<p>Everything a desktop needs and a server doesn’t has been removed. What’s left '
+            + 'is the control panel you’re looking at, the <b>outlaw</b> command-line tool, and '
+            + 'the boring-but-critical parts: updates, the error log, health checks and a '
+            + 'guarded terminal.</p>',
     },
     {
         id: 'first-steps', cat: 'Getting started', title: 'First things to do',
-        keywords: 'setup begin start new fresh checklist wifi pin theme',
-        body: '<ol><li>Connect to the internet — <b>Settings → Network &amp; Wi-Fi</b>.</li>'
-            + '<li>Set a <b>PIN</b> if you want sign-in — <b>Settings → Security</b>.</li>'
-            + '<li>Pick a look — <b>Settings → Appearance</b> (Green Phosphor or Gold Gunmetal).</li>'
-            + '<li>Install your apps — <b>Apps</b> page (Steam, Firefox, Godot…).</li>'
-            + '<li>Set up local AI — <b>AI Assistant → Set up your private AI → Check my PC</b>.</li></ol>',
+        keywords: 'setup begin start new fresh checklist order password 2fa network',
+        body: '<ol><li><b>Set the admin password</b> — run <code>sudo outlaw passwd</code>. It '
+            + 'prints a two-factor secret; add it to your authenticator app now.</li>'
+            + '<li><b>Confirm 2FA works</b> — <code>sudo outlaw 2fa &lt;user&gt; &lt;code&gt;</code>. '
+            + 'Until you do this, two-factor is <i>not</i> enforced, so a mistyped secret can’t '
+            + 'lock you out.</li>'
+            + '<li><b>Check the network</b> — <b>Settings → Network &amp; Wi-Fi</b>.</li>'
+            + '<li><b>Add your SSH key</b> — <b>Settings → SSH keys</b>, so you can get in '
+            + 'without a password.</li>'
+            + '<li><b>Set up remote access</b> — <code>sudo outlaw remote up</code>, then '
+            + '<code>sudo outlaw remote bind tunnel</code>.</li>'
+            + '<li><b>Install what you actually need</b> — <b>Apps</b> page. A fresh machine '
+            + 'ships with none of it.</li></ol>',
     },
     {
-        id: 'sessions', cat: 'Getting started', title: 'Desktop vs Dev session',
-        keywords: 'greeter switch session dev desktop codemaker boot choose',
-        body: '<p>At boot, the <b>greeter</b> lets you choose <b>Desktop</b> (this shell) or '
-            + '<b>Dev</b> (Outlaw CodeMaker). You can switch later from <b>Settings → Session → '
-            + 'Switch to Dev session</b>. Tick "always start in this session" to skip the greeter; '
-            + 'reset that under <b>Settings → Session → Show greeter on next boot</b>.</p>',
+        id: 'sign-in', cat: 'Getting started', title: 'Signing in (password + 2FA)',
+        keywords: 'login sign in password 2fa totp authenticator aegis code admin passwd secret',
+        body: '<p>The panel needs a <b>password</b> and a <b>six-digit code</b> from an '
+            + 'authenticator app. Create the administrator with <code>sudo outlaw passwd</code> — '
+            + 'it prints the two-factor secret once.</p>'
+            + '<p>Add that secret to a free authenticator: <b>Aegis</b> (open source, recommended), '
+            + '<b>Ente Auth</b> or Google Authenticator. Then prove it works with '
+            + '<code>sudo outlaw 2fa &lt;user&gt; &lt;code&gt;</code>.</p>'
+            + '<p><b>Two-factor is not enforced until that confirmation succeeds.</b> That is '
+            + 'deliberate — a secret you copied down wrong can’t lock you out of your own '
+            + 'server.</p>'
+            + '<p>Five bad attempts locks that address out for 15 minutes. Every sign-in and '
+            + 'privileged action is recorded — see <code>outlaw audit</code>.</p>',
+    },
+    {
+        id: 'panel-vs-lean', cat: 'Getting started', title: 'Panel mode vs Lean mode',
+        keywords: 'mode panel lean headless ui optional overhead ram resources listener',
+        body: '<p>Every install picks a mode, and can switch at any time with '
+            + '<code>sudo outlaw mode panel</code> / <code>sudo outlaw mode lean</code>.</p>'
+            + '<ul><li><b>Panel</b> — the full browser UI on <code>http://127.0.0.1:7717</code>. '
+            + 'Easiest to run and configure. Costs a little RAM for the daemon.</li>'
+            + '<li><b>Lean</b> — no UI and <b>nothing listening at all</b>. SSH plus the '
+            + '<code>outlaw</code> command. Nothing renders, nothing polls.</li></ul>'
+            + '<p>Either way the OS does <b>no background work when nothing is being asked of '
+            + 'it</b> — no idle timers, no telemetry, no polling loops.</p>',
+    },
+    {
+        id: 'two-frontends', cat: 'Getting started', title: 'At the machine, or from a browser',
+        keywords: 'console local browser remote same ui screen monitor keyboard frontend',
+        body: '<p>There are two ways to see this panel, and they show <b>the same screens</b> '
+            + 'backed by the same operations:</p>'
+            + '<ul><li><b>At the machine</b> — plug in a monitor and it’s already on screen.</li>'
+            + '<li><b>From a browser</b> — over your private tunnel, from a laptop or phone '
+            + 'anywhere (see <i>Remote access</i>).</li></ul>'
+            + '<p>Nothing is “local only”. Anything you can do sitting at the box you can do from '
+            + 'the couch, and the other way round.</p>',
     },
 
-    // ---- The desktop -------------------------------------------------------
+    // ---- The panel ---------------------------------------------------------
     {
-        id: 'nav', cat: 'The desktop', title: 'Finding your way around',
-        keywords: 'navigation sidebar screens menu layout dashboard',
-        body: '<p>The left <b>sidebar</b> switches screens: Dashboard, System Core, Files, '
-            + 'Task Manager, Terminal, Gaming, Game Dev, Apps, AI Assistant, Calculator and '
-            + 'Settings. The top bar shows live CPU/RAM and the clock.</p>',
+        id: 'nav', cat: 'The panel', title: 'Finding your way around',
+        keywords: 'navigation sidebar screens menu layout dashboard where',
+        body: '<p>The left <b>sidebar</b> switches screens:</p>'
+            + '<ul><li><b>Dashboard</b> — machine summary and storage at a glance.</li>'
+            + '<li><b>Files</b> — browse the filesystem.</li>'
+            + '<li><b>Services</b> — start, stop and enable systemd units.</li>'
+            + '<li><b>System Log</b> — the journal, filtered and searchable.</li>'
+            + '<li><b>Firewall</b> — open and close ports.</li>'
+            + '<li><b>Remote Access</b> — where the panel is reachable from.</li>'
+            + '<li><b>Task Manager</b> — live CPU/RAM and what’s using them.</li>'
+            + '<li><b>Terminal</b> — a guarded shell.</li>'
+            + '<li><b>Apps</b> — Docker, Portainer, Cockpit and Pterodactyl.</li>'
+            + '<li><b>AI Helper</b> — optional, off unless you set it up.</li>'
+            + '<li><b>Settings</b> and <b>Help</b>.</li></ul>'
+            + '<p>The top bar shows live CPU/RAM and the clock.</p>',
     },
     {
-        id: 'windows', cat: 'The desktop', title: 'Windows & the taskbar',
-        keywords: 'minimize maximize close taskbar tint2 openbox window manage drag',
-        body: '<p>App windows have normal title-bar buttons — <b>minimize, maximize, close</b> — '
-            + 'and a <b>taskbar</b> along the bottom shows what’s open (left-click to '
-            + 'restore/hide, middle-click to close). This is handled by a tiny window manager '
-            + '(openbox + tint2) that loads on top of the desktop.</p>',
+        id: 'shortcuts', cat: 'The panel', title: 'Keyboard shortcuts',
+        keywords: 'keyboard shortcuts hotkeys keys ctrl alt palette search emergency stop',
+        body: '<ul><li><b>Ctrl + Space</b> — command palette: search every screen, setting and '
+            + 'action.</li>'
+            + '<li><b>Alt + 1…9</b> — jump straight to the Nth sidebar screen.</li>'
+            + '<li><b>Ctrl + ,</b> — Settings.</li>'
+            + '<li><b>Ctrl + K</b> — ask the AI helper from anywhere.</li>'
+            + '<li><b>Esc</b> — close whatever is on top (palette, dialog, menu), one at a '
+            + 'time.</li>'
+            + '<li><b>Ctrl + Alt + K</b> — <b>emergency stop</b>: kills every subprocess the '
+            + 'panel started. A last resort if something hangs the interface.</li></ul>'
+            + '<p>Every control is reachable with <b>Tab</b> and <b>Enter</b> alone — nothing '
+            + 'needs a mouse.</p>',
     },
     {
-        id: 'themes', cat: 'The desktop', title: 'Themes & the retro look',
-        keywords: 'theme appearance green phosphor gold gunmetal broken glitch crt scanline color fault',
+        id: 'themes', cat: 'The panel', title: 'Themes & the retro look',
+        keywords: 'theme appearance green phosphor gold gunmetal broken glitch crt scanline color',
         body: '<p><b>Settings → Appearance</b> switches between <b>Green Phosphor</b> (classic '
-            + 'terminal green), <b>Gold Gunmetal</b> (the sci-fi-fortress look that matches '
-            + 'CodeMaker) and <b>Broken</b> — a machine barely holding together: washed-out '
-            + 'phosphor, flicker, glitch bursts and fake <b>SYSTEM FAULT</b> pop-ups (pure '
-            + 'theatre — nothing is actually wrong, and they never touch the real error log). '
-            + 'There’s also an optional <b>CRT</b> effect. <b>Reduce motion</b> stills all of it. '
-            + 'The whole UI recolors instantly — no restart.</p>',
+            + 'terminal green), <b>Gold Gunmetal</b> (the sci-fi-fortress look) and <b>Broken</b> — '
+            + 'a machine barely holding together: washed-out phosphor, flicker, glitch bursts and '
+            + 'fake <b>SYSTEM FAULT</b> pop-ups.</p>'
+            + '<p><b>Broken is pure theatre.</b> Nothing is actually wrong, and it never touches '
+            + 'the real error log. If you’re demoing a server to someone, you probably want it '
+            + 'off.</p>'
+            + '<p>There’s also an optional <b>CRT</b> effect and a phosphor <b>glow</b>. The whole '
+            + 'UI recolors instantly — no restart.</p>',
+    },
+    {
+        id: 'accessibility', cat: 'The panel', title: 'Accessibility options',
+        keywords: 'accessibility a11y contrast motion text size scale readable screen reader legible eyes',
+        body: '<p><b>Settings → Appearance</b>:</p>'
+            + '<ul><li><b>Reduce motion</b> — stops every decorative animation, transition and '
+            + 'glitch effect. Also lighter on weak hardware.</li>'
+            + '<li><b>High contrast</b> — brighter text, no faded elements, stronger borders and '
+            + 'much stronger focus outlines.</li>'
+            + '<li><b>Text size</b> — Compact / Normal / Large / Extra large, scaling the whole '
+            + 'interface.</li>'
+            + '<li><b>Reset appearance</b> — puts all of it back to defaults if you’ve made it '
+            + 'unreadable.</li></ul>'
+            + '<p>Turning off <b>CRT scanlines</b> and <b>phosphor glow</b> gives the crispest, '
+            + 'most legible text.</p>',
     },
 
-    // ---- Apps & games ------------------------------------------------------
+    // ---- Remote access -----------------------------------------------------
     {
-        id: 'apps', cat: 'Apps & games', title: 'Installing apps',
-        keywords: 'apps install software packages essentials catalog pacman',
-        body: '<p>The <b>Apps</b> page installs software for you. <b>Essentials</b> (Steam, '
-            + 'Firefox, Godot) and security tools may ask for your password. Everything installs '
-            + 'through the system package manager, so updates are handled centrally '
-            + '(<b>Settings → System Package Updates</b>).</p>',
+        id: 'remote-why', cat: 'Remote access', title: 'Why the panel refuses most addresses',
+        keywords: 'bind refuse listen loopback tunnel lan public wildcard http plain exits security',
+        body: '<p>The panel speaks <b>plain HTTP</b>. So it is only ever allowed to listen in two '
+            + 'places: <b>loopback</b> (this machine alone), or <b>an address that belongs to a '
+            + 'WireGuard/Tailscale interface</b> — where everything is already encrypted end to '
+            + 'end before it touches a wire.</p>'
+            + '<p>A LAN address, a public address or a wildcard bind is <b>refused, and the daemon '
+            + 'exits</b>. That is deliberately stronger than a firewall rule: the socket is never '
+            + 'created on those interfaces at all, so there is no rule to get wrong, and nothing '
+            + 'to forget after a reboot.</p>'
+            + '<p>If you see <code>REFUSING to listen</code> in the log, that is this rule doing '
+            + 'its job — see <i>“REFUSING to listen” at startup</i>.</p>',
     },
     {
-        id: 'on-this-pc', cat: 'Apps & games', title: 'Apps already on this PC',
-        keywords: 'on this pc discover installed appimage desktop launch found',
-        body: '<p>The Apps page has an <b>On this PC</b> view that auto-discovers everything '
-            + 'you’ve installed — both regular <code>.desktop</code> apps and <b>AppImages</b> '
-            + 'you download into Downloads/Applications. One click launches them; no manual '
-            + 'refresh needed.</p>',
+        id: 'tailscale', cat: 'Remote access', title: 'Reaching it from anywhere (Tailscale)',
+        keywords: 'tailscale remote anywhere tunnel vpn tailnet join login url free account magicdns',
+        body: '<p><b>Tailscale</b> builds a private encrypted network between your own devices. '
+            + 'It’s free for personal use, and it means your control panel is never exposed to '
+            + 'the open internet — there is no public address to find and nothing to '
+            + 'port-forward.</p>'
+            + '<p>Run this at the machine or over SSH:</p>'
+            + '<pre>sudo outlaw remote up\nsudo outlaw remote bind tunnel</pre>'
+            + '<p><code>remote up</code> prints a <b>sign-in link</b>. Open it in any browser, log '
+            + 'in to Tailscale, and the machine joins your tailnet. <code>remote bind tunnel</code> '
+            + 'then moves the panel onto that tunnel address.</p>'
+            + '<p>Install Tailscale on your laptop or phone, sign in to the same account, and the '
+            + 'panel is reachable from there and nowhere else. The <b>Remote Access</b> screen '
+            + 'shows exactly where things stand.</p>',
     },
     {
-        id: 'appimages', cat: 'Apps & games', title: 'Running AppImages',
-        keywords: 'appimage download run executable fuse lm studio chmod',
-        body: '<p>An <b>AppImage</b> is a single-file app. Save it to <b>Downloads</b> or '
-            + '<b>Applications</b> and it shows up under <b>Apps → On this PC</b>. Outlaw makes it '
-            + 'executable and runs it for you (it includes FUSE support, with an automatic '
-            + 'fallback if FUSE is missing). LM Studio is installed exactly this way.</p>',
+        id: 'remote-bind', cat: 'Remote access', title: 'Pointing the panel at the tunnel',
+        keywords: 'bind loopback tunnel address change where listening port 7717 restart',
+        body: '<p><code>sudo outlaw remote bind &lt;where&gt;</code> takes:</p>'
+            + '<ul><li><b>loopback</b> — this machine only (the default).</li>'
+            + '<li><b>tunnel</b> — the tunnel address it finds, whichever interface that is.</li>'
+            + '<li>an explicit <b>address</b> — accepted only if it really belongs to a '
+            + 'WireGuard/Tailscale interface.</li></ul>'
+            + '<p>The panel listens on port <b>7717</b>. After binding, reach it at '
+            + '<code>http://&lt;tunnel-address&gt;:7717</code> — the Remote Access screen prints '
+            + 'the exact URL.</p>',
+    },
+    {
+        id: 'remote-serve', cat: 'Remote access', title: 'HTTPS and a real hostname',
+        keywords: 'https tls certificate padlock serve hostname ts.net letsencrypt magicdns name',
+        body: '<p>Want a padlock and a memorable name instead of an IP?</p>'
+            + '<pre>sudo outlaw remote serve on</pre>'
+            + '<p>This puts Tailscale’s own HTTPS proxy in front of the panel — a free '
+            + 'Let’s Encrypt certificate for the machine’s <code>*.ts.net</code> name — while the '
+            + 'daemon itself stays on loopback.</p>'
+            + '<p>It changes nothing about who can reach it: still your tailnet, still nobody '
+            + 'else. <code>sudo outlaw remote serve off</code> undoes it.</p>',
+    },
+    {
+        id: 'wireguard', cat: 'Remote access', title: 'Self-hosted WireGuard instead',
+        keywords: 'wireguard self hosted no third party private own vpn wg tunnel',
+        body: '<p>Prefer to involve no third party at all? <b>wireguard-tools</b> is installed, and '
+            + 'a self-hosted WireGuard address is accepted by <b>exactly the same rule</b> as a '
+            + 'Tailscale one.</p>'
+            + '<p>Set up your WireGuard interface however you normally would, then '
+            + '<code>sudo outlaw remote bind tunnel</code> (or bind the address explicitly). The '
+            + 'panel checks that the address really belongs to a tunnel interface before it '
+            + 'listens.</p>'
+            + '<p>You’re on your own for the WireGuard config itself — that’s a deliberate '
+            + 'trade: total independence, more setup.</p>',
+    },
+    {
+        id: 'remote-off', cat: 'Remote access', title: 'Turning remote access off',
+        keywords: 'off down disable stop tailscaled leave tailnet idle cost overhead opt in',
+        body: '<p>Remote access is <b>off until you ask for it</b>. <code>tailscaled</code> is not '
+            + 'enabled at install time.</p>'
+            + '<ul><li><code>sudo outlaw remote down</code> — leave the tailnet, but '
+            + '<code>tailscaled</code> keeps running.</li>'
+            + '<li><code>sudo outlaw remote off</code> — leave <b>and</b> stop the daemon: back to '
+            + 'nothing running and nothing listening.</li></ul>'
+            + '<p>Worth being straight about: a tunnel daemon is a real process with real (small) '
+            + 'memory use and periodic keepalive traffic. That’s the honest price of being '
+            + 'reachable, and it’s why it’s opt-in rather than on.</p>'
+            + '<p>If you turned off remote access while bound to a tunnel address, remember to '
+            + '<code>sudo outlaw remote bind loopback</code> too, or the panel will refuse to '
+            + 'start next boot.</p>',
     },
 
-    // ---- AI ----------------------------------------------------------------
+    // ---- Server software ---------------------------------------------------
     {
-        id: 'ai-setup', cat: 'AI', title: 'Setting up local AI',
-        keywords: 'ai lm studio ollama built-in model download setup check pc recommend server engine',
-        body: '<p>Open <b>AI Assistant</b> and click <b>Check my PC</b> — Outlaw reads your RAM, GPU and '
-            + 'CPU, recommends a model your hardware can run, and tells you the best <b>engine</b> for it. '
-            + 'You have three choices (see <i>AI engines</i>): the <b>built-in</b> model is already on — '
-            + 'zero setup; <b>Ollama</b> takes one command to pull a bigger model; <b>LM Studio</b> is a '
-            + 'point-and-click app. Pick the engine in <b>Settings → AI &amp; VRAM</b>. Stuck? Use the '
-            + '<b>Ask the AI to set itself up</b> box — it already knows your exact hardware.</p>',
+        id: 'server-apps', cat: 'Server software', title: 'Docker, Portainer and Cockpit',
+        keywords: 'docker portainer cockpit install remove stop containers admin console apps',
+        body: '<p><b>Apps → Server software.</b> Nothing is installed until you ask — a fresh '
+            + 'machine ships with none of it, so an idle server runs nothing it wasn’t told to.</p>'
+            + '<ul><li><b>Docker</b> — containers. Pterodactyl and Portainer both sit on top of '
+            + 'it.</li>'
+            + '<li><b>Portainer</b> — point-and-click Docker management. Published to '
+            + '<b>loopback only</b>: it can control every container on the box, so it does not go '
+            + 'on a network interface. Reach it over your tunnel, like the panel.</li>'
+            + '<li><b>Cockpit</b> — the classic Linux admin console. Installed '
+            + '<b>socket-activated</b>, so it uses nothing at all until a browser connects.</li></ul>'
+            + '<p>Each can be <b>stopped without uninstalling</b> (frees the memory, keeps the '
+            + 'setup) or removed outright.</p>',
     },
     {
-        id: 'ai-assistant', cat: 'AI', title: 'Using the AI Assistant',
-        keywords: 'assistant chat ask commands open app search private local',
-        body: '<p>Everything runs <b>locally</b> — no account, nothing leaves your machine. Ask '
-            + 'questions, or give commands like <i>open steam</i>, <i>search godot tutorials</i> or '
-            + '<i>list files</i>. It already knows your hardware, so it can answer things like '
-            + '“can my PC run a bigger model?”</p>',
+        id: 'apps-data-safe', cat: 'Server software', title: 'Removing software never deletes your data',
+        keywords: 'remove uninstall data volumes keep safe delete docker var lib restore',
+        body: '<p>Removing Docker, Portainer or Cockpit from the Apps screen removes the '
+            + '<b>packages</b>. It leaves container volumes and <code>/var/lib/docker</code> '
+            + 'exactly as they are.</p>'
+            + '<p>So anything you were running can be brought straight back by reinstalling — your '
+            + 'Minecraft world does not evaporate because you uninstalled Portainer.</p>'
+            + '<p>If you genuinely want the data gone too, that’s a deliberate act you do yourself '
+            + 'in the terminal. The panel will not do it for you by accident.</p>',
     },
     {
-        id: 'system-core', cat: 'AI', title: 'The System Core',
-        keywords: 'system core telemetry diagnostics voice tts live ai sci-fi monitor',
-        body: '<p>The <b>System Core</b> is the sci-fi centerpiece: live telemetry (CPU/RAM/GPU), '
-            + 'three-tier <b>diagnostics</b>, and an optional <b>Live AI</b> with a dystopian '
-            + 'persona that can run checks and open apps. It can speak aloud if you enable '
-            + '<b>System Core voice</b> in Settings (needs a TTS engine).</p>',
+        id: 'pterodactyl', cat: 'Server software', title: 'Game servers (Pterodactyl)',
+        keywords: 'pterodactyl game server minecraft rust valheim panel wings install fqdn install script',
+        body: '<p><b>Pterodactyl</b> is the game-server manager: a web panel where you create '
+            + 'Minecraft, Rust, Valheim and dozens of other servers, edit configs, watch consoles '
+            + 'and give friends access — without touching a terminal.</p>'
+            + '<pre>sudo outlaw-pterodactyl panel --fqdn your-box.ts.net --email you@example.com\nsudo outlaw-pterodactyl wings</pre>'
+            + '<p><b>This one is not a single button, and the reason is worth being straight '
+            + 'about.</b> It installs a database, a PHP runtime, a web server, a queue worker and a '
+            + 'scheduled job, and it asks you questions partway through. That’s a ten-minute '
+            + 'operation you should be able to watch — so it’s a script you run and read, not a '
+            + 'spinner over a process you can’t see.</p>'
+            + '<p><code>sudo outlaw-pterodactyl status</code> shows what’s done so far.</p>',
     },
-
-    // ---- Dev session -------------------------------------------------------
     {
-        id: 'dev-session', cat: 'Dev session', title: 'The Dev session (Outlaw CodeMaker)',
-        keywords: 'dev codemaker game development agent godot switch session pyqt',
-        body: '<p><b>Outlaw CodeMaker</b> is the AI game-dev agent — a separate session focused '
-            + 'on building Godot games (project picker, new-game wizard, AI that plans and edits). '
-            + 'Open it from the <b>greeter</b> or <b>Settings → Session → Switch to Dev session</b>. '
-            + 'The first switch may download its tools; let it finish.</p>',
+        id: 'ptero-rerun', cat: 'Server software', title: 'If the Pterodactyl install stops partway',
+        keywords: 'pterodactyl failed error rerun resume restart halfway step broken retry',
+        body: '<p>It <b>stops at the first thing that fails</b> and shows you the exact command and '
+            + 'error rather than carrying on over a broken step.</p>'
+            + '<p>It is also <b>re-runnable</b>: every step checks whether its work is already '
+            + 'done, so a run that died halfway can be fixed and started again with the same '
+            + 'command. You will not get a duplicate database or a second copy of the panel.</p>'
+            + '<p>Read the error, fix that one thing (usually a missing package, no disk space, or '
+            + 'a name that doesn’t resolve), and run it again.</p>',
+    },
+    {
+        id: 'ptero-limits', cat: 'Server software', title: 'What the Pterodactyl installer won’t do',
+        keywords: 'pterodactyl firewall port tls certificate ssl https not automatic decision',
+        body: '<p>Two things it deliberately does <b>not</b> do:</p>'
+            + '<ul><li><b>It never opens a firewall port.</b> That stays your decision, on the '
+            + '<b>Firewall</b> screen. An installer that quietly exposes ports is an installer you '
+            + 'can’t trust.</li>'
+            + '<li><b>It doesn’t obtain a TLS certificate.</b> Inside a tailnet the tunnel already '
+            + 'encrypts everything; on a public domain that’s a decision with real consequences '
+            + 'and should be made on purpose.</li></ul>'
+            + '<p>Once the panel is up, open the ports your game servers actually need — and only '
+            + 'those.</p>',
     },
 
     // ---- System tools ------------------------------------------------------
     {
-        id: 'task-manager', cat: 'System tools', title: 'Task Manager',
-        keywords: 'task manager end task process tree kill cpu ram gpu vram filter',
-        body: '<p><b>Task Manager</b> lists everything running. Type in <b>Filter by name</b> to '
-            + 'find an app, click its row, then <b>End task</b> (close nicely) or <b>End process '
-            + 'tree</b> (force-close it and what it started). The cards up top show live '
-            + '<b>CPU, memory and GPU/VRAM</b>. Some processes belong to the administrator and '
-            + 'show <i>needs admin</i> when ended — that’s normal.</p>',
+        id: 'services', cat: 'System tools', title: 'Services',
+        keywords: 'services systemd start stop restart enable disable unit daemon boot running',
+        body: '<p>The <b>Services</b> screen lists systemd units with their state, and lets you '
+            + '<b>start</b>, <b>stop</b>, <b>restart</b>, <b>enable</b> (start at boot) and '
+            + '<b>disable</b> them.</p>'
+            + '<p><b>Enabled</b> and <b>running</b> are different things, and the screen shows both: '
+            + 'a unit can be running now but not come back after a reboot, which is a classic way '
+            + 'to lose a game server at 3am.</p>'
+            + '<p>Same jobs from the command line: <code>outlaw services</code>, '
+            + '<code>outlaw start|stop|restart|enable|disable &lt;unit&gt;</code>.</p>',
+    },
+    {
+        id: 'logs', cat: 'System tools', title: 'System Log',
+        keywords: 'log journal journalctl errors warnings unit filter search recent lines',
+        body: '<p>The <b>System Log</b> screen shows recent journal lines — the system’s own record '
+            + 'of what happened. Filter by <b>unit</b> to see one service’s story, or search the '
+            + 'text.</p>'
+            + '<p>This is the first place to look when something didn’t start: the reason is '
+            + 'almost always written here in plain language.</p>'
+            + '<p>From the command line: <code>outlaw logs [unit] [n]</code> (200 lines by '
+            + 'default).</p>',
+    },
+    {
+        id: 'firewall', cat: 'System tools', title: 'Firewall',
+        keywords: 'firewall ufw port open close allow deny rules block game server 25565',
+        body: '<p>The <b>Firewall</b> screen turns the firewall on or off, lists the rules, and '
+            + 'opens or closes single ports.</p>'
+            + '<p>Open a port by number and protocol — e.g. <b>25565 / tcp</b> for Minecraft. '
+            + 'Delete a rule by its number.</p>'
+            + '<p><b>Only your game servers need open ports.</b> The control panel does not: it '
+            + 'rides the tunnel, so it is reachable without any rule at all. If you find yourself '
+            + 'about to open 7717 to the internet, stop — that’s the one thing this OS is built to '
+            + 'prevent.</p>'
+            + '<p>Ranges and lists aren’t accepted here on purpose (a typo’d range silently opens '
+            + 'the wrong thing). Use the terminal for those.</p>',
+    },
+    {
+        id: 'ssh-keys', cat: 'System tools', title: 'SSH keys',
+        keywords: 'ssh key authorized_keys public private ed25519 rsa login password paste pub',
+        body: '<p><b>Settings → SSH keys.</b> A key listed here <b>is a login</b> — anyone holding '
+            + 'the matching private key gets in, with no password.</p>'
+            + '<p>Paste the contents of your <code>.pub</code> file (usually '
+            + '<code>~/.ssh/id_ed25519.pub</code>). <b>Never paste a private key</b> — that’s the '
+            + 'half that stays on your own machine, and pasting it here would be handing it '
+            + 'away.</p>'
+            + '<p>Keys with SSH <i>options</i> attached (<code>command=</code>, '
+            + '<code>environment=</code>, <code>permitopen=</code>) are refused. Those run code on '
+            + 'every login, and pasting one you didn’t write is a well-known way to be handed a '
+            + 'backdoor. Add those by hand if you truly mean to.</p>',
+    },
+    {
+        id: 'tasks', cat: 'System tools', title: 'Task Manager',
+        keywords: 'task manager processes cpu ram memory usage kill top load monitor',
+        body: '<p>Live <b>CPU</b>, <b>memory</b> and <b>GPU</b> usage, with the processes using '
+            + 'them. Sort to find whatever is eating the box, and end a process that’s stuck.</p>'
+            + '<p>It only polls <b>while you’re looking at it</b> — leave the screen and the '
+            + 'polling stops. That’s the rule everywhere in this OS: no background work when '
+            + 'nothing is being asked of it.</p>'
+            + '<p>From the command line: <code>outlaw stats</code>.</p>',
     },
     {
         id: 'terminal', cat: 'System tools', title: 'The Secure Terminal',
-        keywords: 'terminal command shell sudo pacman destructive confirm rm',
-        body: '<p>A normal shell running in your home folder as you. <b>Destructive commands</b> '
-            + '(<code>rm -rf</code>, <code>dd</code>, <code>mkfs</code>…) are intercepted and '
-            + 'need you to type <b>CONFIRM</b> first, so you can’t wipe the machine by '
-            + 'accident. Use <code>sudo</code> for admin tasks.</p>',
+        keywords: 'terminal shell command line guarded dangerous confirm sudo bash prompt',
+        body: '<p>A real shell, with a guard: commands that could destroy the machine ask for '
+            + 'confirmation first, spelling out what’s about to happen.</p>'
+            + '<p>It’s not a sandbox and doesn’t pretend to be — it’s a seatbelt against the '
+            + 'classic 2am <code>rm -rf</code> with a space in the wrong place.</p>'
+            + '<p>Everything the panel’s buttons do, you can also do here. Nothing is hidden from '
+            + 'you.</p>',
     },
     {
         id: 'files', cat: 'System tools', title: 'Files',
-        keywords: 'files browse folders open file manager thunar documents downloads',
-        body: '<p>Browse your folders (Downloads, Documents, Pictures, Projects…). If a file '
-            + 'won’t open from here, use <b>Open in file manager</b> to launch the full file '
-            + 'manager (Thunar), which has the right “open with” handlers.</p>',
+        keywords: 'files browse filesystem folder directory manager navigate open',
+        body: '<p>Browse the filesystem, open folders and see what’s where — useful for finding a '
+            + 'config file or checking that a world save is where you think it is.</p>'
+            + '<p>For heavy work (moving lots of data, editing configs) the <b>Terminal</b> is '
+            + 'faster and honest about what it’s doing.</p>',
+    },
+    {
+        id: 'storage', cat: 'System tools', title: 'Storage & disks',
+        keywords: 'storage disk space full free usage filesystem mount df capacity',
+        body: '<p>The <b>Dashboard</b> has a <b>Storage</b> card showing each filesystem and how '
+            + 'full it is. The panel also warns you at startup if the disk is nearly full.</p>'
+            + '<p>Take that warning seriously on a server: a full disk is how installs, updates '
+            + 'and databases fail in confusing ways, and game servers write more than people '
+            + 'expect (world saves, backups, container images, logs).</p>'
+            + '<p><b>Settings → Free up space</b> clears package caches and old logs. From the '
+            + 'command line: <code>outlaw disk</code>.</p>',
+    },
+    {
+        id: 'outlaw-cli', cat: 'System tools', title: 'The `outlaw` command',
+        keywords: 'cli command line outlaw terminal ssh headless lean tool help usage',
+        body: '<p>Everything the panel does is also a command, which is what makes <b>Lean mode</b> '
+            + 'and plain SSH viable. <code>outlaw help</code> lists them all.</p>'
+            + '<ul><li><code>outlaw status</code> / <code>stats</code> / <code>disk</code> — what '
+            + 'this machine is and what it’s doing.</li>'
+            + '<li><code>outlaw services</code>, <code>start|stop|restart|enable|disable '
+            + '&lt;unit&gt;</code>.</li>'
+            + '<li><code>outlaw logs [unit] [n]</code>.</li>'
+            + '<li><code>outlaw mode panel|lean</code>.</li>'
+            + '<li><code>outlaw passwd</code>, <code>outlaw 2fa</code>, <code>outlaw audit</code>.</li>'
+            + '<li><code>outlaw remote …</code> — see <i>Remote access</i>.</li></ul>'
+            + '<p>Anything that changes the system needs <code>sudo</code>.</p>',
+    },
+    {
+        id: 'audit', cat: 'System tools', title: 'The audit log',
+        keywords: 'audit log sign in attempts security who record history privileged action',
+        body: '<p><code>outlaw audit [n]</code> shows recent sign-ins and privileged actions: who, '
+            + 'what, when, and from which address — including the <b>failed</b> attempts.</p>'
+            + '<p>On a machine reachable from anywhere, this is the record that tells you whether '
+            + 'anyone has been trying the door. Check it after anything surprising.</p>',
     },
 
     // ---- Settings & updates ------------------------------------------------
     {
         id: 'updates', cat: 'Settings & updates', title: 'Updating Outlaw Server',
-        keywords: 'update updater shell channel stable beta repair package upgrade version',
-        body: '<p><b>Settings → Outlaw Shell Updates</b> updates Outlaw itself (shell + all its '
-            + 'components) with one click, and keeps the previous version for rollback. '
-            + '<b>System Package Updates</b> updates every installed app + the system. '
-            + 'Note: before v1.0 there’s <b>no difference</b> between the Stable and Beta '
-            + 'channels — both get the newest build. <b>Reinstall / repair all components</b> fixes '
-            + 'a half-applied update without touching your files.</p>',
+        keywords: 'update upgrade version release channel stable beta packages pacman shell',
+        body: '<p>Two separate things, both in <b>Settings</b>:</p>'
+            + '<ul><li><b>Outlaw Shell Updates</b> — new versions of this control panel and the OS '
+            + 'tooling, from GitHub releases. Pick <b>stable</b> or <b>beta</b>.</li>'
+            + '<li><b>System Package Updates</b> — everything else on the machine, through the '
+            + 'system package manager.</li></ul>'
+            + '<p>While this OS is pre-1.0 there is no real difference between the channels: every '
+            + 'build is a prerelease, so stable falls back to the newest one. That changes at '
+            + '1.0.</p>'
+            + '<p>Update at a time you can watch it. Servers are exactly the machines where an '
+            + 'unattended update at the wrong moment hurts.</p>',
     },
     {
-        id: 'security', cat: 'Settings & updates', title: 'PIN, lock & sign-in',
-        keywords: 'pin sign in lock password security authorize unlock picker greeter session screen power menu',
-        body: '<p><b>Settings → Security</b> lets you set a <b>4-digit PIN</b> and require sign-in '
-            + 'on startup. With a PIN set, the <b>session picker</b> also asks for it before you can '
-            + 'choose Desktop or Dev, and you can <b>lock the screen any time</b> from the power menu '
-            + '(⏻ → 🔒 Lock). The PIN (or your password) is also asked before important installs like '
-            + 'Essentials and security tools. Forgot the PIN? Use <b>Use password instead</b> (your '
-            + 'account password) at any sign-in or the picker.</p>',
+        id: 'security-settings', cat: 'Settings & updates', title: 'PIN, lock & auto-lock',
+        keywords: 'pin lock unlock idle auto lock security screen console physical access',
+        body: '<p><b>Settings → Security &amp; sign-in</b> covers the panel <b>on this machine</b> — '
+            + 'the console someone could walk up to.</p>'
+            + '<ul><li><b>Ask to sign in on startup</b> — lock the panel until a PIN or password is '
+            + 'entered.</li>'
+            + '<li><b>Auto-lock when idle</b> — lock automatically after 5–30 minutes of nothing '
+            + 'happening. Needs a PIN.</li>'
+            + '<li><b>Unlock PIN</b> — a 4-digit PIN for quick unlocking at the keyboard.</li></ul>'
+            + '<p>This is separate from the browser sign-in (password + 2FA), which is what guards '
+            + 'remote access. A PIN is for the person standing in the room; it is not a substitute '
+            + 'for the password.</p>',
     },
-
     {
-        id: 'reviewer', cat: 'Settings & updates', title: 'Help test this version (reporting)',
-        keywords: 'report works broken test feedback stable channel review version github issue tally',
-        body: '<p><b>Settings → Help Test This Version</b> lets you tell the maintainer whether a '
-            + 'build works. Click <b>✓ Works for me</b> or <b>✗ Having problems</b> and Outlaw opens a '
-            + '<b>pre-filled GitHub issue</b> — just review and Submit. It includes the version and a '
-            + 'short system summary (no account info; an anonymous machine hash lets duplicate reports '
-            + 'be merged). The <b>Community tally</b> shows 👍/👎 reactions on the release. Enough '
-            + 'positive reports is how a build eventually gets promoted to the <b>stable</b> channel.</p>',
+        id: 'ai', cat: 'Settings & updates', title: 'The AI helper (off by default)',
+        keywords: 'ai assistant model local ollama offline help explain errors optional off private',
+        body: '<p>An optional, small, <b>local</b> AI that answers setup questions and explains '
+            + 'errors. No cloud, no account, nothing leaves the machine.</p>'
+            + '<p>It is <b>off by default and stays off until you turn it on</b>, because a server’s '
+            + 'memory belongs to what it’s serving. When enabled it loads only while it’s '
+            + 'answering and unloads itself afterward — <b>zero idle cost</b>.</p>'
+            + '<p><b>AI Helper → Check my PC</b> reads your RAM, GPU and CPU and recommends a model '
+            + 'this box can actually run. On a small server, the honest answer is sometimes '
+            + '“don’t” — and it will say so.</p>',
+    },
+    {
+        id: 'report-problem', cat: 'Settings & updates', title: 'Report a problem',
+        keywords: 'report bug error log crash github issue send collect copy clear problem',
+        body: '<p><b>Settings → Report a problem.</b> Click <b>Collect errors</b> and it gathers '
+            + 'errors and warnings from the panel, Xorg and the system journal — deduplicated, so '
+            + 'one repeating fault doesn’t bury everything else.</p>'
+            + '<p><b>Copy</b> it, click <b>Open GitHub issues</b>, and paste it into a new issue. '
+            + 'Then <b>Clear</b> it, so already-reported errors don’t pile up with new ones.</p>'
+            + '<p>Read what you’re about to post. It’s a log from your machine — hostnames and '
+            + 'paths are in there.</p>',
+    },
+    {
+        id: 'reviewer', cat: 'Settings & updates', title: 'Help test this version',
+        keywords: 'test reviewer alpha feedback checklist try report help version quality',
+        body: '<p>This OS is <b>alpha</b>, and honest testing is the most useful thing you can '
+            + 'contribute. <b>Settings → Help Test This Version</b> walks through what’s new and '
+            + 'what’s most likely to be broken.</p>'
+            + '<p>The things worth testing hardest are the ones that can lock you out: '
+            + '<b>remote access</b>, the <b>firewall</b>, and <b>sign-in</b>. Test those while you '
+            + 'still have a keyboard attached to the machine.</p>',
+    },
+    {
+        id: 'recovery', cat: 'Settings & updates', title: 'Boot & recovery',
+        keywords: 'boot recovery hotswap installer reinstall dual another os wipe partition',
+        body: '<p><b>Settings → Boot &amp; Recovery</b>:</p>'
+            + '<ul><li><b>Hotswap to another OS</b> — sets the next boot to another installed OS '
+            + '(or opens the boot menu).</li>'
+            + '<li><b>Open Installer</b> — sets up or removes Outlaw Server.</li></ul>'
+            + '<p>Your other OS and data stay untouched unless you explicitly choose to wipe.</p>',
     },
 
     // ---- Troubleshooting ---------------------------------------------------
     {
+        id: 'trouble-refuse-bind', cat: 'Troubleshooting', title: '“REFUSING to listen” at startup',
+        keywords: 'refusing listen exit daemon wont start bind error address tunnel down loopback',
+        body: '<p>The panel refused to open a socket on the address it was told to use, and '
+            + 'exited. That is the bind rule working, not a bug — see <i>Why the panel refuses '
+            + 'most addresses</i>.</p>'
+            + '<p>Almost always one of two things:</p>'
+            + '<ul><li><b>The tunnel is down.</b> The address was a valid tunnel address last '
+            + 'boot, but Tailscale/WireGuard isn’t up yet, so it no longer belongs to any '
+            + 'interface. Bring it up: <code>sudo outlaw remote up</code>.</li>'
+            + '<li><b>It was pointed at a LAN or public address.</b> Refused permanently — your '
+            + 'password would cross the wire in the clear.</li></ul>'
+            + '<p>To get back in right now: <code>sudo outlaw remote bind loopback</code>, then '
+            + 'reach it at the machine itself.</p>',
+    },
+    {
+        id: 'trouble-no-panel', cat: 'Troubleshooting', title: 'Can’t reach the panel remotely',
+        keywords: 'cant reach connect remote browser timeout refused tailscale not working url',
+        body: '<p>Work down this list — it’s in the order things actually go wrong:</p>'
+            + '<ol><li><b>Is the machine on the tailnet?</b> <code>outlaw remote</code> at the box '
+            + '(or over SSH) says so plainly.</li>'
+            + '<li><b>Is the panel bound to the tunnel?</b> If it still says loopback, run '
+            + '<code>sudo outlaw remote bind tunnel</code>.</li>'
+            + '<li><b>Is your laptop on the same tailnet?</b> Same account, Tailscale running, '
+            + 'connected.</li>'
+            + '<li><b>Right URL?</b> Port <b>7717</b>, and <code>http://</code> unless you turned on '
+            + '<code>remote serve</code>.</li>'
+            + '<li><b>Is the mode right?</b> <code>outlaw mode</code> — in <b>lean</b> mode nothing '
+            + 'is listening, by design.</li></ol>'
+            + '<p>Do <b>not</b> "fix" this by opening port 7717 in the firewall. That defeats the '
+            + 'entire design and puts a plain-HTTP login on the internet.</p>',
+    },
+    {
+        id: 'trouble-locked-out', cat: 'Troubleshooting', title: 'Locked out of the panel',
+        keywords: 'locked out lockout 15 minutes password forgot 2fa code wrong reset attempts',
+        body: '<p><b>Five bad attempts locks that address out for 15 minutes.</b> Waiting is the '
+            + 'intended fix — that delay is what makes guessing a password impractical.</p>'
+            + '<p>If you’ve lost the password or the 2FA secret, you need access to the machine '
+            + 'itself (physically or over SSH):</p>'
+            + '<pre>sudo outlaw passwd\nsudo outlaw 2fa &lt;user&gt; &lt;code&gt;</pre>'
+            + '<p>That sets a new password and prints a fresh 2FA secret to enrol.</p>'
+            + '<p>If your codes are rejected but the password is right, check the machine’s '
+            + '<b>clock</b> — <b>Settings → Time &amp; Clock</b>. Time-based codes fail when the '
+            + 'clock has drifted.</p>'
+            + '<p>This is exactly why <b>SSH keys</b> are worth adding on day one: they’re a way '
+            + 'back in that doesn’t depend on the panel.</p>',
+    },
+    {
+        id: 'trouble-service', cat: 'Troubleshooting', title: 'A service won’t start',
+        keywords: 'service failed start wont run unit systemd error crash boot enable journal',
+        body: '<p>Open <b>System Log</b> and filter to that unit. The reason is nearly always '
+            + 'written there in plain language — a missing file, a port already in use, a '
+            + 'permission problem, or no disk space.</p>'
+            + '<p>Two things people miss:</p>'
+            + '<ul><li>A service that runs now but isn’t <b>enabled</b> will not come back after a '
+            + 'reboot.</li>'
+            + '<li>A full disk breaks services in ways that look like anything but a full disk. '
+            + 'Check the Dashboard’s Storage card first.</li></ul>',
+    },
+    {
+        id: 'trouble-game-server', cat: 'Troubleshooting', title: 'Friends can’t connect to my game server',
+        keywords: 'game server connect friends port firewall minecraft cant join timeout public',
+        body: '<p>Game servers <b>do</b> need open ports — unlike the control panel. Check, in '
+            + 'order:</p>'
+            + '<ol><li><b>Is the server running?</b> Services screen, or the Pterodactyl panel.</li>'
+            + '<li><b>Is the port open here?</b> <b>Firewall</b> screen — e.g. 25565/tcp for '
+            + 'Minecraft.</li>'
+            + '<li><b>Is it forwarded to this machine?</b> On your router, if you’re behind '
+            + 'one.</li>'
+            + '<li><b>Are they using the right address?</b> Your public address, not the tunnel '
+            + 'address — tailnet addresses only work for devices on your tailnet.</li></ol>'
+            + '<p>Open only the ports the game needs. Every extra open port is a door you now own '
+            + 'the consequences of.</p>',
+    },
+    {
         id: 'trouble-boot', cat: 'Troubleshooting', title: 'It won’t boot / black screen',
-        keywords: 'boot black screen wont start graphics kms virtualbox vm bare metal',
-        body: '<p>Outlaw is built and tested for <b>bare-metal</b> machines — that’s the '
-            + 'supported path. Virtual machines (especially VirtualBox on a Windows host with '
-            + 'Hyper-V/WSL2 enabled) are flaky and <b>not officially supported</b>. On real '
-            + 'hardware, a black screen after the menu usually means a graphics-mode hiccup — try '
-            + 'rebooting once. If it persists, note your GPU and report it.</p>',
+        keywords: 'boot black screen wont start blank stuck graphics safe kms usb bios uefi',
+        body: '<p>At the boot menu, pick the <b>safe graphics</b> entry — most black screens are a '
+            + 'graphics driver that doesn’t like this hardware.</p>'
+            + '<p>If it boots but the panel never appears, you still have a working machine: switch '
+            + 'to a text console with <b>Ctrl + Alt + F2</b>, log in, and use the '
+            + '<code>outlaw</code> command. A server that boots to a shell is fine — the panel is '
+            + 'optional.</p>'
+            + '<p>Then check <code>outlaw logs</code> for what failed, and see '
+            + '<i>“REFUSING to listen” at startup</i> if the panel exited on purpose.</p>',
     },
     {
-        id: 'trouble-gfx', cat: 'Troubleshooting', title: 'Desktop crashes or black screen (safe graphics)',
-        keywords: 'crash black screen safe mode graphics gpu intel software gl mesa picom watchdog',
-        body: '<p>If the desktop crashes on startup, Outlaw automatically retries in <b>safe '
-            + 'graphics</b> — software rendering with GPU acceleration turned off — which runs on '
-            + 'practically any hardware (handy for flaky Intel/Mesa GPUs that report '
-            + '“failed to load module intel”). It then <b>stays</b> in safe graphics so it can’t '
-            + 'crash-loop; everything still works, it’s just not GPU-accelerated. To retry your '
-            + 'GPU later, open a <b>Terminal</b> and run <code>rm ~/.outlaw-safe-gfx</code>, then '
-            + 'reboot.</p>',
-    },
-    {
-        id: 'trouble-wifi', cat: 'Troubleshooting', title: 'No internet / Wi-Fi',
-        keywords: 'wifi internet network offline connect nmcli download fails forget saved password changed',
-        body: '<p>Go to <b>Settings → Network &amp; Wi-Fi</b>, scan, pick your network and enter '
-            + 'the password. A wired cable works automatically. Most “install failed” or '
-            + '“can’t download” errors are simply no connection — check here first. If a network\'s '
-            + 'password <b>changed</b> and it keeps failing, hit <b>Forget</b> on its row in the scan '
-            + 'list (deletes the stale saved profile), then connect fresh with the new password.</p>',
-    },
-    {
-        id: 'display-settings', cat: 'Settings & updates', title: 'Display resolution & brightness',
-        keywords: 'display resolution refresh rate hz monitor screen mode xrandr brightness backlight dim revert',
-        body: '<p><b>Settings → Display</b> lists every connected screen with its available '
-            + 'resolutions and refresh rates (only modes the display itself reports — nothing '
-            + 'experimental). Hit <b>Apply</b> and you get <b>15 seconds</b> to click <i>Keep '
-            + 'settings</i>; if you don\'t — say the picture went black — the OS <b>reverts on its '
-            + 'own</b>, so you can\'t get stuck. Kept modes are restored on every boot (and '
-            + 're-checked against the connected display first). <b>Reset to automatic</b> puts '
-            + 'everything back on native modes. On laptops the same card has a <b>Brightness</b> '
-            + 'slider (also in ☰ quick settings) — it dims but never goes fully dark.</p>',
-    },
-    {
-        id: 'screen-recording', cat: 'The desktop', title: 'Screen recording',
-        keywords: 'screen record recording video capture clip movie ffmpeg rec videos',
-        body: '<p>Record the screen from the topbar <b>☰ quick settings → 🎥</b> (or the command '
-            + 'palette). A red <b>⏺ REC</b> pill appears in the top bar while recording — click it to '
-            + 'stop. Clips save to <b>~/Videos</b> as MP4 (video-only). Needs the <b>ffmpeg</b> package '
-            + '— if it\'s missing, install it from <b>Apps</b> (search “ffmpeg”). The OS won\'t '
-            + 'auto-sleep while a recording is running.</p>',
-    },
-    {
-        id: 'sound-output', cat: 'The desktop', title: 'Volume & sound output device',
-        keywords: 'volume sound audio output device speakers headphones headset hdmi sink mute',
-        body: '<p>Click the <b>🔊 speaker</b> in the top bar for the volume slider and mute. When more '
-            + 'than one output exists (speakers, a headset, HDMI audio), an <b>Output device</b> list '
-            + 'appears underneath — click one to switch the default output instantly.</p>',
-    },
-    {
-        id: 'trouble-ai', cat: 'Troubleshooting', title: 'LM Studio won’t connect',
-        keywords: 'lm studio not reachable ai disabled start server port 1234 model',
-        body: '<p>If the AI says LM Studio isn’t reachable: open LM Studio, <b>load a '
-            + 'model</b>, then click <b>Start Server</b> (it must be on <b>port 1234</b>). Then '
-            + 'turn on <b>Enable on-device AI</b> in Settings. If the button won’t open LM '
-            + 'Studio, make sure the <code>.AppImage</code> is in your Downloads/Applications '
-            + 'folder and press <b>Get / Open LM Studio</b> again.</p>',
+        id: 'trouble-net', cat: 'Troubleshooting', title: 'No internet',
+        keywords: 'network internet wifi ethernet connection dns offline cant download nmcli',
+        body: '<p><b>Settings → Network &amp; Wi-Fi</b> to connect. On a server, prefer a '
+            + '<b>wired</b> connection where you can: it survives reboots without a password and '
+            + 'doesn’t drop when the access point reboots.</p>'
+            + '<p>If the network is up but downloads fail, it’s usually DNS or the clock. Check '
+            + '<b>Settings → Time &amp; Clock</b> — a badly wrong clock breaks HTTPS to everything, '
+            + 'which looks exactly like "the internet is broken".</p>',
     },
     {
         id: 'trouble-install', cat: 'Troubleshooting', title: 'Install problems',
-        keywords: 'install installer partition disk erase free space windows shrink wifi',
-        body: '<p>Connect to the internet <b>before</b> installing (the installer needs to '
-            + 'download packages). Choose <b>erase a disk</b> or <b>use free space</b>. '
-            + 'Automatic Windows-partition shrinking had a bug that a recent update fixed; if it '
-            + 'still fails for you, make free space first (e.g. shrink the partition from Windows), '
-            + 'then pick <b>use free space</b>.</p>',
-    },
-
-    // ---- New in the 2.0.x hardening + QOL stream ----------------------------
-    {
-        id: 'airplane-offline', cat: 'Settings & updates', title: 'Airplane mode & offline mode',
-        keywords: 'airplane offline wifi radio network disconnect plane flight internet bluetooth',
-        body: '<p><b>Airplane mode</b> (<b>Settings → Network &amp; Wi-Fi</b>) turns your Wi-Fi '
-            + '(and Bluetooth) off in one tap — handy on a plane or to save power. <b>Offline mode</b> '
-            + 'is automatic: whenever there is no internet, a badge appears and Outlaw stops attempting '
-            + 'web actions (update checks, model downloads, web search) so nothing hangs. Either way, '
-            + 'everything local — your AI, files, apps and projects — keeps working normally.</p>',
-    },
-    {
-        id: 'storage-as-ram', cat: 'Settings & updates', title: 'Use storage as extra memory',
-        keywords: 'ram memory swap swapfile storage low-end oom out of memory slow pagefile',
-        body: '<p>On a machine short on RAM, turn on <b>Use storage as extra memory</b> '
-            + '(<b>Settings → AI &amp; VRAM</b>). It adds a 4&nbsp;GB swapfile so the system can keep '
-            + 'an AI model and the desktop running instead of running out of memory. It is slower than '
-            + 'real RAM and uses 4&nbsp;GB of disk, and you can turn it off any time.</p>',
-    },
-    {
-        id: 'ai-personalities', cat: 'AI', title: 'AI names & personalities',
-        keywords: 'personality name cr1tt3r varmint outlaw core persona model character rename system core',
-        body: '<p>Outlaw has three separate AI personas, each in its own place: <b>Cr1tt3r</b> is your '
-            + 'desktop AI Assistant; <b>V4rm1nt</b> is the coder in the Dev session (Outlaw CodeMaker); and '
-            + 'the <b>OUTLAW CORE</b> is the voice of the System Core command center. They are distinct on '
-            + 'purpose and don\'t change. If you switch the desktop assistant to a different model you loaded '
-            + 'yourself, you can invite <i>that</i> model to <b>pick its own name and personality</b> — just '
-            + 'ask. The bundled built-in model always stays Cr1tt3r.</p>',
-    },
-    {
-        id: 'system-core-hub', cat: 'System tools', title: 'System Core (command center)',
-        keywords: 'system core hub command center telemetry diagnostics control ai health rings',
-        body: '<p>The <b>System Core</b> is your command center: live CPU / RAM / VRAM rings, '
-            + 'diagnostics, and one-tap actions — <b>Ask Cr1tt3r</b>, <b>Report a Problem</b>, '
-            + '<b>Screenshot</b>, update, and performance mode. To change settings for your hardware, '
-            + 'just ask Cr1tt3r (e.g. "use less VRAM"). The Report button even shows '
-            + 'how many issues are in the error log.</p>',
-    },
-    {
-        id: 'report-problem', cat: 'Troubleshooting', title: 'Report a problem (send the error log)',
-        keywords: 'error log report problem crash bug github send diagnostics issue picker clear copy',
-        body: '<p>If something failed, crashed, or bounced you to the session picker, open '
-            + '<b>Settings → Report a problem</b> (or <b>System Core → Report a Problem</b>). '
-            + 'Click <b>Collect errors</b> to gather a deduplicated log from the desktop, the Dev '
-            + 'session, Xorg, the system journal, and any failed checks or warnings from the '
-            + '<b>System Core diagnostics</b>, then <b>Copy</b> it, click <b>Open GitHub issues</b>, '
-            + 'and paste it into a new issue. When you\'re done reporting, click <b>Clear</b> so '
-            + 'already-sent errors don\'t pile up with new ones. This is the best way to get boot '
-            + 'crash-loops fixed.</p>',
-    },
-    {
-        id: 'shortcuts', cat: 'The desktop', title: 'Keyboard shortcuts',
-        keywords: 'keyboard shortcut hotkey keys ctrl alt esc space palette quick ask navigate switch screen settings terminal history',
-        body: '<p><b>Ctrl + Space</b> — the command palette: search apps, settings, help and actions from anywhere. '
-            + '<b>Ctrl + K</b> — jump to the AI assistant and start typing (a quick ask). '
-            + '<b>Ctrl + ,</b> — open Settings. '
-            + '<b>Alt + 1…9</b> — jump to the matching sidebar screen (1 = Dashboard, 2 = System Core, and so on). '
-            + '<b>Esc</b> — close the palette, any popover, the power menu, or a finished loading screen. '
-            + '<b>PrtSc</b> — save a screenshot to Pictures (<b>Shift+PrtSc</b> to drag-select a region). '
-            + 'In the assistant, press <b>Enter</b> to send. In the Terminal, <b>↑ / ↓</b> recall previous commands.</p>',
-    },
-    {
-        id: 'accessibility', cat: 'Settings & updates', title: 'Accessibility options',
-        keywords: 'accessibility a11y high contrast text size zoom reduce motion keyboard navigation screen reader legibility focus',
-        body: '<p><b>Settings → Appearance</b> has the comfort and legibility options: <b>Text size</b> scales '
-            + 'the whole interface, <b>High contrast</b> brightens text and strengthens borders and focus '
-            + 'outlines, and <b>Reduce motion</b> turns off decorative animation. The desktop is fully '
-            + 'keyboard-navigable — <b>Tab</b> moves between controls, toggles flip with <b>Space</b>, and '
-            + '<b>Esc</b> backs out of any popover or dialog. See the <i>Keyboard shortcuts</i> topic for the '
-            + 'global keys (Ctrl+Space command palette, Alt+1…9 screens, and more).</p>',
-    },
-    {
-        id: 'command-palette', cat: 'The desktop', title: 'Command palette (search everything)',
-        keywords: 'command palette search everything launcher spotlight find quick open ctrl space',
-        body: '<p>Press <b>Ctrl + Space</b> anywhere to open the <b>command palette</b> — one search box over '
-            + 'every screen, settings section, help topic, app and common action (screenshot, lock, sleep, '
-            + 'night light…). Type a few letters, pick with <b>↑ ↓</b>, run with <b>Enter</b>. It\'s the fastest '
-            + 'way to get anywhere in Outlaw Server.</p>',
-    },
-    {
-        id: 'quick-settings', cat: 'The desktop', title: 'Quick settings (topbar ☰)',
-        keywords: 'quick settings control center panel toggles topbar volume night light dnd airplane performance popover',
-        body: '<p>Click the <b>☰</b> button in the top bar for <b>quick settings</b>: night light, Do Not '
-            + 'Disturb, airplane mode and performance mode as one-tap tiles, plus volume, screenshot, lock and '
-            + 'sleep — without opening the full Settings screen. Click the <b>clock</b> for a calendar.</p>',
-    },
-    {
-        id: 'power-management', cat: 'Settings & updates', title: 'Screen blanking & automatic sleep',
-        keywords: 'power management screen blank turn off display sleep idle automatic suspend timeout energy',
-        body: '<p><b>Settings → Power</b> controls what happens when you step away: <b>Turn off the screen '
-            + 'when idle</b> blanks the display (any key wakes it), and <b>Sleep when idle</b> suspends the whole '
-            + 'computer. Keyboard and mouse activity in <i>any</i> app counts. <b>Heads up:</b> controller-only '
-            + 'play can look idle to the system — if you game with a gamepad, use a long sleep timeout or leave it '
-            + 'on Never. Sleep also waits for any running install or download to finish. Pair these with '
-            + '<b>Auto-lock when idle</b> (Settings → Security) to lock the desktop too.</p>',
-    },
-    {
-        id: 'gaming', cat: 'Apps & games', title: 'Gaming (Steam, Lutris, GameMode)',
-        keywords: 'gaming games steam lutris gamemode mangohud play proton fps',
-        body: '<p>The <b>Gaming</b> page launches <b>Steam</b> and <b>Lutris</b> (click to install if '
-            + 'missing) and shows your GPU plus whether <b>GameMode</b> and <b>MangoHud</b> are available. '
-            + 'For the best performance, install the <b>gaming graphics profile</b> in Settings → Session and '
-            + 'turn on <b>Performance Mode</b> while you play.</p>',
-    },
-    {
-        id: 'gamedev-tools', cat: 'Apps & games', title: 'Game-dev tools (Godot, Blender, GIMP)',
-        keywords: 'game dev godot blender gimp vscode code editor art assets tools',
-        body: '<p>The <b>Game Dev</b> page launches the tools you build games with — <b>Godot</b>, '
-            + '<b>Blender</b>, <b>GIMP</b> and a code editor (click to install if missing). To have the AI '
-            + 'write your game <i>for</i> you, switch to the <b>Dev session</b> (Outlaw CodeMaker) from the '
-            + 'boot greeter instead.</p>',
-    },
-    {
-        id: 'hotswap', cat: 'System tools', title: 'Hotswap (boot another OS)',
-        keywords: 'hotswap boot reboot other os windows dual boot grub switch power menu',
-        body: '<p><b>Hotswap</b> (the power menu ⏻, or the topbar button) reboots you straight into another '
-            + 'operating system on your machine — handy for dual-boot setups. Pick the OS and the machine '
-            + 'restarts into it. <i>Known issue being worked on:</i> on some setups it currently needs a '
-            + 'second manual reboot to take.</p>',
-    },
-    {
-        id: 'performance-mode', cat: 'Settings & updates', title: 'Performance Mode',
-        keywords: 'performance mode gaming cpu governor speed power fps boost',
-        body: '<p><b>Performance Mode</b> (in the System Core command center) switches your CPU to a '
-            + 'performance governor for more speed while gaming or building — at the cost of a little more '
-            + 'power. Toggle it off to return to balanced/power-saving. Safe and fully reversible.</p>',
-    },
-    {
-        id: 'drivers', cat: 'Settings & updates', title: 'Graphics / driver profiles',
-        keywords: 'driver graphics gpu vulkan mesa gaming profile lean session nvidia amd intel',
-        body: '<p><b>Settings → Session</b> has a one-click <b>gaming graphics profile</b> that installs the '
-            + 'userspace Vulkan/Mesa + 32-bit stack (plus GameMode/MangoHud) for your GPU, and a <b>lean</b> '
-            + 'profile that reverts it. It\'s applied after boot via the package manager — userspace only, '
-            + 'never the kernel driver or bootloader — so it\'s fully revertible.</p>',
-    },
-    {
-        id: 'ai-tune', cat: 'AI', title: 'Let the AI change settings for you',
-        keywords: 'tune settings auto recommend best optimize vram performance ai cr1tt3r change adjust',
-        body: '<p>Just <b>ask Cr1tt3r</b> in plain language and it changes the setting for you — '
-            + '"use less VRAM", "switch the AI to LM Studio", "turn on performance mode", "make the text bigger", '
-            + '"use the green theme". It can set the VRAM/RAM saver, visual effects, performance mode, update '
-            + 'checks, text size and the AI engine. Every change is safe and reversible.</p>',
-    },
-    {
-        id: 'ai-engines', cat: 'AI', title: 'AI engines — built-in, Ollama or LM Studio',
-        keywords: 'ai engine base built-in ollama lm studio lmstudio model switch backend local',
-        body: '<p>Outlaw can run its local AI three ways — pick one in <b>Settings → AI &amp; VRAM</b>: '
-            + '<b>Built-in</b> (a tiny model that ships with Outlaw — already on, zero setup); '
-            + '<b>Ollama</b> (one command to pull bigger models; works on any GPU or CPU); and '
-            + '<b>LM Studio</b> (a point-and-click app you download). Use <b>Check my PC</b> in the AI '
-            + 'Assistant and Outlaw recommends the best engine and model for your hardware, then walks '
-            + 'you through it. Everything runs on this machine — no account, nothing leaves your PC.</p>',
-    },
-    {
-        id: 'vram-saver', cat: 'AI', title: 'VRAM saver modes',
-        keywords: 'vram saver mode auto off lean minimal video memory gpu tier ai context',
-        body: '<p>The <b>VRAM saver</b> (<b>Settings → AI &amp; VRAM</b>) controls how hard Outlaw trims '
-            + 'AI video-memory use so the desktop stays responsive: <b>Auto</b> (recommended) kicks in only '
-            + 'when free VRAM runs low; <b>Off</b> never trims (use it if you have VRAM to spare); '
-            + '<b>Lean</b> always uses smaller AI contexts (predictable, lighter); <b>Minimal</b> is a '
-            + 'bare-bones emergency mode that also pauses System Core voice + Live mode to free the most '
-            + 'memory. The System Core badge shows the current tier.</p>',
-    },
-    {
-        id: 'volume', cat: 'The desktop', title: 'Volume & sound',
-        keywords: 'volume sound audio mute speaker loud quiet topbar slider pipewire',
-        body: '<p>Click the <b>speaker icon</b> (🔊) on the top bar to open the volume slider and a '
-            + '<b>mute</b> button. Drag the slider to set the level, or click the speaker to mute/unmute. '
-            + 'The icon hides on machines with no audio hardware.</p>',
-    },
-    {
-        id: 'battery', cat: 'The desktop', title: 'Battery indicator & low-battery warnings',
-        keywords: 'battery laptop charge charging percent power topbar low warning critical',
-        body: '<p>On laptops, the top bar shows your <b>battery percentage</b> with 🔋 (on battery) or '
-            + '⚡ (charging). It turns red below 15% when unplugged, and the OS warns you once at '
-            + '<b>20%</b> and again (urgently) at <b>10%</b> so you\'re never surprised by a dead '
-            + 'battery. Plugging in resets the warnings. Desktop computers with no battery don\'t '
-            + 'show any of this.</p>',
-    },
-    {
-        id: 'sleep', cat: 'The desktop', title: 'Sleep / suspend',
-        keywords: 'sleep suspend power menu standby resume wake shutdown reboot',
-        body: '<p>Open the <b>power menu</b> (⏻ on the top bar) and choose <b>🌙 Sleep</b> to suspend the '
-            + 'computer to RAM — it powers down almost everything but keeps your session in memory. Press a '
-            + 'key or the power button to wake it back exactly where you left off. You can also just ask the '
-            + 'AI: "put the computer to sleep".</p>',
-    },
-    {
-        id: 'bluetooth', cat: 'The desktop', title: 'Bluetooth devices',
-        keywords: 'bluetooth pair connect headphones controller mouse keyboard wireless blueman device',
-        body: '<p>In <b>Settings → Network &amp; Wi-Fi</b>, the <b>🔵 Bluetooth</b> row turns the adapter on/off '
-            + 'and <b>Pair a device…</b> opens the Bluetooth manager to pair headphones, controllers, a mouse '
-            + 'and so on. Airplane mode turns Bluetooth off along with Wi-Fi. If it says "no adapter found", '
-            + 'this machine has no Bluetooth hardware.</p>',
-    },
-    {
-        id: 'region-input', cat: 'The desktop', title: 'Keyboard layout, time zone & clock',
-        keywords: 'keyboard layout language region time zone timezone clock ntp date input setxkbmap',
-        body: '<p><b>Settings → Region &amp; Input</b> lets you pick your <b>keyboard layout</b> (applied right '
-            + 'away and on every boot), your <b>time zone</b>, and whether the clock <b>sets itself '
-            + 'automatically</b> over the internet. Changing the time zone or auto-time asks for your password.</p>',
-    },
-    {
-        id: 'night-light', cat: 'The desktop', title: 'Night light (warm the screen)',
-        keywords: 'night light blue light warm color temperature eye strain evening gammastep redshift dark',
-        body: '<p><b>Settings → Desktop &amp; Notifications → 🌙 Night light</b> warms the screen\'s colors to '
-            + 'cut blue light in the evening, which is easier on the eyes. Pick how warm it goes under '
-            + '<b>Warmth</b>. It re-applies itself on every boot while it\'s on, and turning it off restores '
-            + 'normal colors instantly.</p>',
-    },
-    {
-        id: 'do-not-disturb', cat: 'The desktop', title: 'Do Not Disturb (pause notifications)',
-        keywords: 'do not disturb dnd notifications pause silence quiet mute popup dunst focus',
-        body: '<p><b>Settings → Desktop &amp; Notifications → 🔕 Do Not Disturb</b> silences pop-up '
-            + 'notifications so nothing interrupts you. <b>Show last</b> re-displays the most recent one, and '
-            + '<b>Show recent</b> lists the latest notifications so a missed pop-up isn\'t lost. Your '
-            + 'choice sticks across reboots. DND is also a one-tap tile in the topbar <b>☰</b> quick settings.</p>',
-    },
-    {
-        id: 'auto-lock', cat: 'Settings & updates', title: 'Auto-lock when idle',
-        keywords: 'auto lock idle timeout screen lock security pin away inactivity',
-        body: '<p><b>Settings → Security &amp; sign-in → Auto-lock when idle</b> locks the desktop for you '
-            + 'after a stretch of no keyboard or mouse activity, so it\'s protected if you step away. It needs '
-            + 'a <b>PIN</b> set first, and you unlock the same way as at sign-in.</p>',
-    },
-    {
-        id: 'free-up-space', cat: 'System tools', title: 'Free up disk space',
-        keywords: 'storage disk space full clean cleanup cache pacman thumbnails trash reclaim low',
-        body: '<p>Low on disk space? <b>Settings → Free up space</b> reclaims room safely. Click '
-            + '<b>Scan</b> to see how much you can get back, then <b>Clean up</b> — it clears the old '
-            + '<b>package-download cache</b> (keeping the newest of each package), <b>thumbnails</b> and '
-            + 'the <b>Trash</b>. It never touches your installed apps, files or settings. You may be asked '
-            + 'for your password for the package-cache part.</p>',
-    },
-    {
-        id: 'calculator', cat: 'System tools', title: 'Calculator',
-        keywords: 'calculator calc math arithmetic add subtract multiply divide numbers',
-        body: '<p>The <b>Calculator</b> (sidebar) is a simple desktop calculator: click the number '
-            + 'buttons and operators (÷ × − +) and <b>=</b> to calculate, or just type on your keyboard. '
-            + 'Press <b>C</b> or <b>Esc</b> to clear. Basic arithmetic — no memory or scientific functions.</p>',
+        keywords: 'install installer partition disk usb wipe keep other os space failed setup',
+        body: '<p>The installer can set up Outlaw Server alongside another OS or take the whole '
+            + 'disk. Keeping another OS needs enough <b>free space</b> for it to work with.</p>'
+            + '<p>If an install fails partway, don’t reboot into a half-written disk and guess — '
+            + 'collect the log (<b>Report a problem</b>) and post it. Installer bugs are the ones '
+            + 'most worth reporting, because they’re the hardest to recover from.</p>'
+            + '<p>Back up anything you care about before repartitioning. This is alpha software '
+            + 'touching partition tables.</p>',
     },
 ];
