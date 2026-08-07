@@ -652,9 +652,18 @@ systemctl enable NetworkManager apparmor
 # Enabled by default BECAUSE it is the recovery path; the account still needs a
 # real password (set during install) and the firewall screen can close port 22.
 systemctl enable sshd 2>/dev/null || true
-# Firewall on from the first boot. ufw's default policy denies incoming, so the
-# box isn't wide open the moment it gets an IP; the panel's firewall screen
-# opens what each service needs.
+# Firewall. Enabling the UNIT does not by itself switch ufw on (ufw-init only
+# applies rules when ENABLED=yes in /etc/ufw/ufw.conf, which a fresh install
+# doesn't have) — it means ufw comes up with whatever state the admin chose, and
+# survives reboots once they choose it.
+#
+# Seed the SSH rule BEFORE that ever happens. ufw's default policy denies
+# incoming, so the first person to switch the firewall on — from the panel, in
+# one click — would otherwise cut off sshd, the very thing enabled above as the
+# way back in when the panel is unreachable. `limit` rather than `allow`: it
+# permits SSH but rate-limits repeated connections from one address, which is
+# the cheap half of brute-force protection.
+ufw limit 22/tcp 2>/dev/null || true
 systemctl enable ufw 2>/dev/null || true
 # Keep the clock correct automatically over the internet (NTP).
 systemctl enable systemd-timesyncd
