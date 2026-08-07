@@ -57,6 +57,26 @@ function memInfo() {
 
 const gb = (kb) => Math.round((kb / 1024 / 1024) * 10) / 10;
 
+// Friendly names for the keyboard layouts people actually pick. DISPLAY ONLY —
+// the authoritative list always comes from `localectl list-x11-keymap-layouts`,
+// so a layout missing from this table still appears (under its bare code) and a
+// layout listed here that the system lacks is never offered.
+const KB_LABELS = {
+    us: 'English (US)', gb: 'English (UK)', ie: 'English (Ireland)',
+    de: 'German', at: 'German (Austria)', ch: 'Swiss',
+    fr: 'French', be: 'Belgian', ca: 'Canadian',
+    es: 'Spanish', latam: 'Spanish (Latin America)',
+    pt: 'Portuguese', br: 'Portuguese (Brazil)',
+    it: 'Italian', nl: 'Dutch',
+    dk: 'Danish', no: 'Norwegian', se: 'Swedish', fi: 'Finnish', is: 'Icelandic',
+    pl: 'Polish', cz: 'Czech', sk: 'Slovak', hu: 'Hungarian', ro: 'Romanian',
+    si: 'Slovenian', hr: 'Croatian', rs: 'Serbian', bg: 'Bulgarian',
+    gr: 'Greek', tr: 'Turkish', ru: 'Russian', ua: 'Ukrainian', by: 'Belarusian',
+    ee: 'Estonian', lv: 'Latvian', lt: 'Lithuanian',
+    il: 'Hebrew', ara: 'Arabic', ir: 'Persian',
+    in: 'Indian', cn: 'Chinese', jp: 'Japanese', kr: 'Korean', th: 'Thai', vn: 'Vietnamese',
+};
+
 // CPU load without sampling over time (which would mean sleeping / timers).
 // Load average is the standard server metric and costs one file read.
 function cpuLoad() {
@@ -750,6 +770,84 @@ const ops = {
         return { ...on, enabled: true, movedToLoopback: changes.host === '127.0.0.1', restartRequired: true };
     },
 
+    // --- keyboard layout ----------------------------------------------------
+    // The desktop OS drove this with `setxkbmap`, which is X-session-only and
+    // resets at every login. That is the wrong tool on a server: the place the
+    // layout matters most is the TEXT CONSOLE, where you type the root password
+    // when X isn't running — and in lean mode there is no X at all.
+    //
+    // `localectl` is the right tool: it writes /etc/vconsole.conf (console) and
+    // /etc/X11/xorg.conf.d/00-keyboard.conf (X), it persists across reboots, and
+    // it owns the console<->X11 name mapping (X's "gb" is the console's "uk"),
+    // which is exactly the kind of table that rots if we keep our own copy.
+
+    'keyboard:status': async () => {
+        if (!IS_LINUX) return { available: false, error: 'Keyboard layout is set on the server itself.' };
+        const [cur, avail] = await Promise.all([
+            run('localectl', ['status']),
+            run('localectl', ['list-x11-keymap-layouts']),
+        ]);
+        if (!cur.ok && !avail.ok) {
+            return { available: false, error: 'localectl is not available on this system (systemd-localed).' };
+        }
+        // "X11 Layout: gb" / "VC Keymap: uk"
+        const grab = (label) => {
+            const m = cur.stdout.match(new RegExp('^\\s*' + label + ':\\s*(\\S+)', 'm'));
+            return m ? m[1] : '';
+        };
+        const layouts = avail.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+        return {
+            available: true,
+            ok: true,
+            x11: grab('X11 Layout'),
+            console: grab('VC Keymap'),
+            // The system's own list, not a table of ours — so this can never
+            // offer a layout the machine doesn't actually have.
+            layouts: layouts.map((code) => ({ code, label: KB_LABELS[code] || code })),
+        };
+    },
+
+    'keyboard:set': async (_ctx, { layout } = {}) => {
+        if (!IS_LINUX) return { ok: false, error: 'Keyboard layout is set on the server itself.' };
+        const want = String(layout == null ? '' : layout).trim();
+        if (!/^[a-z0-9_-]{1,32}$/i.test(want)) {
+            return { ok: false, error: 'That is not a layout code.' };
+        }
+        // Validate against what the system lists, not against a regex alone —
+        // rule 2: caller input is checked against a real system list first.
+        const avail = await run('localectl', ['list-x11-keymap-layouts']);
+        if (!avail.ok) return { ok: false, error: 'Could not read the available layouts from localectl.' };
+        const known = new Set(avail.stdout.split('\n').map((s) => s.trim()).filter(Boolean));
+        if (!known.has(want)) return { ok: false, error: `This system has no keyboard layout called "${want}".` };
+
+        // Persist for BOTH surfaces. localectl converts the X11 layout to the
+        // matching console keymap on its own (no --no-convert), so one call
+        // covers the graphical panel and the text console.
+        const set = await run('localectl', ['set-x11-keymap', want], { timeout: 15000 });
+        if (!set.ok) {
+            return { ok: false, error: (set.stderr || set.stdout || 'localectl refused the change').trim().slice(0, 200) };
+        }
+        // Persisted config only takes effect at the next login/boot, so also
+        // apply it to the X session running right now if there is one. Failure
+        // here is not an error: the setting IS saved either way.
+        let appliedNow = false;
+        if (process.env.DISPLAY) {
+            const live = await run('setxkbmap', [want], { timeout: 8000 });
+            appliedNow = live.ok;
+        }
+        const after = await run('localectl', ['status']);
+        const vc = (after.stdout.match(/^\s*VC Keymap:\s*(\S+)/m) || [])[1] || '';
+        return {
+            ok: true,
+            layout: want,
+            console: vc,
+            appliedNow,
+            note: appliedNow
+                ? 'Applied now and saved for the console and future logins.'
+                : 'Saved for the console and future logins. Log out or reboot for the graphical panel to pick it up.',
+        };
+    },
+
     // --- daemon self-description -------------------------------------------
 
     'daemon:info': async (ctx) => {
@@ -762,8 +860,9 @@ const ops = {
             bindKind: remote.classifyBind(cfg.host).kind,
             serve: cfg.trustProxy === true,
             // Honest statement of what this build can do yet.
-            phase: 5,
-            note: 'Phase 5: the full server toolset, one-click Docker/Portainer/Cockpit, and a guided Pterodactyl install (outlaw-pterodactyl).',
+            phase: 6,
+            note: 'Phase 6: the full server toolset, one-click Docker/Portainer/Cockpit, a guided Pterodactyl install, '
+                + 'remote access driven from the panel, and a keyboard-layout picker. Not yet tested on real hardware.',
         };
     },
 };

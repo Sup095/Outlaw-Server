@@ -123,11 +123,17 @@ async function refreshRegionUi() {
     try {
         if (!_regionPopulated) {
             const zones = await api.time.zones();
-            if (tzSel && Array.isArray(zones)) tzSel.innerHTML = zones.map((z) => `<option value="${z}">${z}</option>`).join('');
-            _regionPopulated = true;
+            if (tzSel && Array.isArray(zones) && zones.length) {
+                tzSel.innerHTML = zones.map((z) => `<option value="${z}">${z}</option>`).join('');
+                _regionPopulated = true;
+            }
         }
         const tSt = await api.time.status();
         if (tzSel && tSt && tSt.timezone) tzSel.value = tSt.timezone;
+        // The zone list arrives long after enhanceSelects() ran, so the custom
+        // dropdown was built around an EMPTY select and opened an empty list —
+        // the time zone was unsettable. Rebuild it now that it has options.
+        if (tzSel && _regionPopulated) rebuildSelect(tzSel);
         if (ntp && tSt) ntp.checked = !!tSt.ntp;
         const sub = document.querySelector('#tz-sub'); if (sub && tSt && tSt.local) sub.textContent = tSt.local;
     } catch { /* leave defaults */ }
@@ -587,7 +593,7 @@ function showScreen(name) {
     if (name === 'dashboard') { renderRecentApps(); refreshDisks(); }
     if (name === 'apps') { refreshServerApps(); refreshPterodactyl(); loadAppsCatalog(); const as = $('#apps-search'); if (as) as.focus(); }
     if (name === 'help') { renderHelp(($('#help-search') || {}).value || ''); const hs = $('#help-search'); if (hs) hs.focus(); }
-    if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); refreshSshKeys(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
+    if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); refreshSshKeys(); refreshKeyboard(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
     if (name === 'ai') $('#ai-in').focus();
     if (name === 'terminal') $('#term-in').focus();
     // Server screens load on arrival and on demand — never on a timer.
@@ -813,9 +819,9 @@ async function refreshServerApps() {
             <div class="row" style="gap:6px;align-items:center;white-space:nowrap;">
                 <span class="badge${a.running ? ' on' : ''}">${_escapeHtml(state)}</span>
                 ${a.installed
-        ? `<button data-app="${a.id}" data-app-action="${a.running ? 'stop' : 'start'}">${a.running ? 'Stop' : 'Start'}</button>
-                     <button class="danger" data-app="${a.id}" data-app-action="remove">Remove</button>`
-        : `<button class="primary" data-app="${a.id}" data-app-action="install">Install</button>`}
+        ? `<button data-app="${a.id}" data-app-action="${a.running ? 'stop' : 'start'}" aria-label="${a.running ? 'Stop' : 'Start'} ${_escapeHtml(a.name)}">${a.running ? 'Stop' : 'Start'}</button>
+                     <button class="danger" data-app="${a.id}" data-app-action="remove" aria-label="Remove ${_escapeHtml(a.name)}">Remove</button>`
+        : `<button class="primary" data-app="${a.id}" data-app-action="install" aria-label="Install ${_escapeHtml(a.name)}">Install</button>`}
             </div>
         </div>`;
     }).join('') || '<div class="muted">No server software listed.</div>';
@@ -882,6 +888,61 @@ async function refreshDisks() {
 // --- SSH keys ---------------------------------------------------------------
 function _sshMsg(t) { const el = $('#ssh-key-msg'); if (el) el.textContent = t || ''; }
 
+// ---------------------------------------------------------------------------
+// Keyboard layout (Settings)
+// ---------------------------------------------------------------------------
+// This one governs how you type the ROOT PASSWORD at the console, so the two
+// things that matter are: never offer a layout the machine doesn't have (the
+// list comes from the system, via the op), and never report a change as applied
+// when it only took effect for the next login.
+function _kbMsg(t) { const e = $('#kb-msg'); if (e) e.textContent = t || ''; }
+
+async function refreshKeyboard() {
+    const sel = $('#kb-select'), sub = $('#kb-sub'), btn = $('#kb-apply');
+    if (!sel) return;
+    const r = await op('keyboard:status');
+    if (unreadable(r)) {
+        sel.innerHTML = '';
+        sel.disabled = true;
+        if (btn) btn.disabled = true;
+        if (sub) sub.textContent = 'Couldn\'t read the keyboard layout: ' + ((r && r.error) || 'unknown error');
+        rebuildSelect(sel);
+        return;
+    }
+    sel.disabled = false;
+    if (btn) btn.disabled = false;
+    const layouts = Array.isArray(r.layouts) ? r.layouts : [];
+    sel.innerHTML = layouts
+        .map((l) => `<option value="${_escapeHtml(l.code)}">${_escapeHtml(l.label)}${l.label === l.code ? '' : ' (' + _escapeHtml(l.code) + ')'}</option>`)
+        .join('');
+    if (r.x11) sel.value = r.x11;
+    if (sub) {
+        // Show BOTH surfaces: they are set together but named differently
+        // (X11 "gb" is the console's "uk"), and seeing them agree is the
+        // evidence that the change actually landed.
+        sub.textContent = `Panel: ${r.x11 || 'unknown'} · text console: ${r.console || 'unknown'}`;
+    }
+    rebuildSelect(sel);
+}
+
+async function applyKeyboard() {
+    const sel = $('#kb-select'), btn = $('#kb-apply');
+    const layout = (sel || {}).value;
+    if (!layout) { _kbMsg('Pick a layout first.'); return; }
+    if (btn) btn.disabled = true;
+    _kbMsg(`Setting the keyboard layout to ${layout}…`);
+    const r = await op('keyboard:set', { layout });
+    if (btn) btn.disabled = false;
+    if (!r || r.ok === false) {
+        _kbMsg('Couldn\'t change it: ' + ((r && r.error) || 'unknown error'));
+        refreshKeyboard();          // put the dropdown back to what's really set
+        return;
+    }
+    _kbMsg('✓ ' + (r.note || 'Layout saved.') + ' Try the test box.');
+    toast(r.appliedNow ? `Keyboard layout: ${layout}` : `Keyboard layout saved: ${layout} (re-login for the panel)`);
+    refreshKeyboard();
+}
+
 async function refreshSshKeys() {
     const box = $('#ssh-key-list');
     if (!box) return;
@@ -938,12 +999,14 @@ async function sshRemoveKey(index) {
 }
 
 // --- Remote access ----------------------------------------------------------
+// The Tailscale sign-in link, kept across refreshes until sign-in completes.
+let _lastAuthUrl = '';
+
 async function refreshRemote() {
     const box = $('#remote-summary');
     const authBox = $('#remote-auth');
     if (!box) return;
     box.textContent = 'Loading…';
-    if (authBox) authBox.textContent = '';
     const r = await op('remote:status');
     if (r.ok === false) { box.textContent = "Couldn't read remote-access status: " + (r.error || 'unknown'); return; }
 
@@ -977,9 +1040,122 @@ async function refreshRemote() {
     }
     box.innerHTML = html;
 
-    if (authBox && ts.authUrl) {
-        authBox.textContent = 'Waiting for sign-in. Open this link on any device: ' + ts.authUrl;
+    // The sign-in link is the one thing on this screen the user cannot get back
+    // by any other means, so it survives a refresh. `remote:status` only reports
+    // an AuthURL while tailscaled happens to be advertising one; clearing the
+    // box whenever it doesn't would throw away the link `remote up` just handed
+    // us, mid-authentication.
+    if (authBox) {
+        if (ts.authUrl) _lastAuthUrl = ts.authUrl;
+        if (ts.connected) _lastAuthUrl = '';            // signed in — no longer needed
+        authBox.textContent = _lastAuthUrl
+            ? 'Waiting for sign-in. Open this link on any device: ' + _lastAuthUrl
+            : '';
     }
+
+    // Reflect real state onto the controls rather than letting them sit at a
+    // default that might be a lie.
+    const serveTog = $('#remote-serve-toggle');
+    if (serveTog) {
+        serveTog.checked = !!(r.serve && r.serve.enabled);
+        // Serving only makes sense once there's a tailnet to serve on.
+        serveTog.disabled = !ts.connected;
+        const sub = $('#remote-serve-sub');
+        if (sub && !ts.connected) sub.textContent = 'Join the tailnet first — there is no *.ts.net name to get a certificate for yet.';
+    }
+    const bindTunnel = $('#remote-bind-tunnel');
+    if (bindTunnel) bindTunnel.disabled = !ts.connected;
+    for (const id of ['#remote-down', '#remote-off']) {
+        const b = $(id);
+        if (b) b.disabled = !ts.installed;
+    }
+}
+
+function _remoteMsg(t) { const e = $('#remote-msg'); if (e) e.textContent = t || ''; }
+
+// Every one of these changes how (or whether) this machine can be reached, so
+// each says plainly what it is about to do — and the ones that can cut off the
+// person clicking them ask first.
+async function remoteUp() {
+    const btn = $('#remote-up');
+    if (btn) btn.disabled = true;
+    _remoteMsg('Starting tailscaled and asking for a sign-in link…');
+    const r = await op('remote:up');
+    if (btn) btn.disabled = false;
+    if (!r || r.ok === false) {
+        _remoteMsg('Couldn\'t join: ' + ((r && r.error) || 'unknown error')
+            + (r && r.hint ? '  —  ' + r.hint : ''));
+        return;
+    }
+    _remoteMsg(r.authUrl
+        ? 'Open this link on any device to finish signing in, then press Refresh.'
+        : (r.note || 'Connected.'));
+    // Hand it to the shared holder so the refresh below re-renders it instead
+    // of wiping the link the user still needs.
+    if (r.authUrl) _lastAuthUrl = r.authUrl;
+    refreshRemote();
+}
+
+async function remoteBind(target) {
+    // Moving to loopback while you are reading this over the tunnel ends your
+    // own session at the next daemon restart. Say so before, not after.
+    if (target === 'loopback') {
+        const okGo = await askConfirm({
+            title: 'Make the panel local-only?',
+            reason: 'The panel will listen on 127.0.0.1 and stop being reachable over the tunnel. '
+                + 'If you are connected remotely right now, you will lose access when the daemon restarts, '
+                + 'and will need the machine\'s own keyboard (or SSH) to undo it.',
+            cmd: 'outlaw remote bind loopback',
+        });
+        if (!okGo) return;
+    }
+    _remoteMsg(target === 'tunnel' ? 'Moving the panel onto the tunnel…' : 'Moving the panel to loopback…');
+    const r = await op('remote:bind', { target });
+    if (!r || r.ok === false) {
+        _remoteMsg('Refused: ' + ((r && r.error) || 'unknown error') + (r && r.hint ? '  —  ' + r.hint : ''));
+        refreshRemote();
+        return;
+    }
+    _remoteMsg(`✓ Saved — the panel will listen on ${r.host}. `
+        + (r.serveDisabled ? 'The HTTPS proxy was switched off, because it only applies on loopback. ' : '')
+        + (r.restartRequired ? 'It moves at the next daemon restart: systemctl restart outlaw-serverd' : ''));
+    refreshRemote();
+}
+
+async function remoteServe(enabled) {
+    const tog = $('#remote-serve-toggle');
+    _remoteMsg(enabled ? 'Asking Tailscale for a certificate…' : 'Removing the HTTPS proxy…');
+    const r = await op('remote:serve', { enabled });
+    if (!r || r.ok === false) {
+        // The hint here is the whole answer nine times out of ten ("enable HTTPS
+        // certificates for your tailnet"), so it must not be swallowed.
+        _remoteMsg('Couldn\'t change it: ' + ((r && r.error) || 'unknown error')
+            + (r && r.hint ? '\n\n' + r.hint : ''));
+        if (tog) tog.checked = !enabled;          // put the switch back
+        refreshRemote();
+        return;
+    }
+    _remoteMsg(enabled
+        ? `✓ HTTPS proxy on${r.url ? ' — ' + r.url : ''}. ${r.movedToLoopback ? 'The daemon was moved to loopback, which is where it belongs behind the proxy. ' : ''}Restart the daemon to apply.`
+        : '✓ HTTPS proxy off. Restart the daemon to apply.');
+    refreshRemote();
+}
+
+async function remoteDown(hard) {
+    const okGo = await askConfirm({
+        title: hard ? 'Leave the tailnet and stop tailscaled?' : 'Leave the tailnet?',
+        reason: 'This machine stops being reachable from anywhere except its own keyboard and the local network. '
+            + 'If you are reading this over the tunnel, this cuts off your own connection.'
+            + (hard ? ' tailscaled will also be stopped and disabled, so nothing runs until you turn it back on.' : ''),
+        cmd: hard ? 'outlaw remote off' : 'outlaw remote down',
+    });
+    if (!okGo) return;
+    _remoteMsg('Leaving the tailnet…');
+    const r = await op('remote:down', { hard: hard === true });
+    _remoteMsg(!r || r.ok === false
+        ? 'Couldn\'t leave: ' + ((r && r.error) || 'unknown error')
+        : '✓ Left the tailnet.' + (hard ? ' tailscaled is stopped.' : ''));
+    refreshRemote();
 }
 
 // ---------------------------------------------------------------------------
@@ -1161,8 +1337,11 @@ function _renderAppsList() {
             const dataAttr = isInstalled
                 ? `data-uninstall-id="${_escapeHtml(a.id)}"`
                 : `data-install-id="${_escapeHtml(a.id)}"`;
+            // Every catalog row has an identically-worded button, so without the
+            // package name in the accessible name a screen reader hears
+            // "Install, Install, Install…" with no way to tell them apart.
             const launchBtn = (isInstalled && a.launchable)
-                ? `<button data-launch="${_escapeHtml(a.id)}">Launch</button>`
+                ? `<button data-launch="${_escapeHtml(a.id)}" aria-label="Launch ${_escapeHtml(a.label)}">Launch</button>`
                 : '';
             html.push(`
                 <div class="card">
@@ -1173,7 +1352,7 @@ function _renderAppsList() {
                         </div>
                         <div class="row" style="gap:6px;flex:0 0 auto;">
                             ${launchBtn}
-                            <button class="${btnClass}" ${isBusy ? 'disabled' : ''} ${dataAttr}>${btnLabel}</button>
+                            <button class="${btnClass}" ${isBusy ? 'disabled' : ''} ${dataAttr} aria-label="${btnLabel} ${_escapeHtml(a.label)}">${btnLabel}</button>
                         </div>
                     </div>
                 </div>
@@ -2085,12 +2264,7 @@ function rebuildAiChatSelect() {
         sel.appendChild(opt);
     }
     if (aiChats.activeId) sel.value = aiChats.activeId;
-    // The custom no-WM dropdown snapshots options at enhance time, so drop the
-    // old wrapper and re-enhance for the current conversation list.
-    const wrap = sel.nextElementSibling;
-    if (wrap && wrap.classList.contains('cselect')) wrap.remove();
-    delete sel.dataset.enhanced;
-    enhanceSelects(sel.parentElement);
+    rebuildSelect(sel);
     rebuildRefSelect();
 }
 
@@ -2113,10 +2287,7 @@ function rebuildRefSelect() {
         sel.appendChild(opt);
     }
     sel.value = '';
-    const wrap = sel.nextElementSibling;
-    if (wrap && wrap.classList.contains('cselect')) wrap.remove();
-    delete sel.dataset.enhanced;
-    enhanceSelects(sel.parentElement);
+    rebuildSelect(sel);
 }
 
 // A compact recap of a chat to feed as cross-chat context: its running summary if
@@ -2643,6 +2814,21 @@ if (api && api.on) api.on('job-progress', (p) => {
 // keyboard user could open a dropdown and then had no way to reach anything in
 // it. It is now a proper combobox — named, arrow-key navigable, Esc to close —
 // using aria-activedescendant so focus never leaves the button.
+// Re-enhance a <select> whose options changed. The custom dropdown snapshots
+// the options when it wraps a select, so anything populated LATER is invisible
+// to it — the wrapper has to be dropped and rebuilt.
+//
+// This is not theoretical: the Time Zone picker is filled in from the daemon
+// after init, so it had been enhanced while still empty and opened an empty
+// list. Every dynamically-filled select must call this.
+function rebuildSelect(sel) {
+    if (!sel) return;
+    const wrap = sel.nextElementSibling;
+    if (wrap && wrap.classList.contains('cselect')) wrap.remove();
+    delete sel.dataset.enhanced;
+    enhanceSelects(sel.parentElement || document);
+}
+
 let _cselectSeq = 0;
 function enhanceSelects(root) {
     (root || document).querySelectorAll('select:not([data-enhanced])').forEach((sel) => {
@@ -3654,6 +3840,17 @@ function wire() {
     { const u = $('#log-unit'); if (u) u.addEventListener('keydown', (e) => { if (e.key === 'Enter') refreshLogs(); }); }
     { const n = $('#log-lines'); if (n) n.addEventListener('change', refreshLogs); }
     { const b = $('#ssh-key-add'); if (b) b.addEventListener('click', sshAddKey); }
+    { const b = $('#kb-apply'); if (b) b.addEventListener('click', applyKeyboard); }
+    { const b = $('#remote-up'); if (b) b.addEventListener('click', remoteUp); }
+    { const b = $('#remote-bind-tunnel'); if (b) b.addEventListener('click', () => remoteBind('tunnel')); }
+    { const b = $('#remote-bind-loopback'); if (b) b.addEventListener('click', () => remoteBind('loopback')); }
+    { const b = $('#remote-down'); if (b) b.addEventListener('click', () => remoteDown(false)); }
+    { const b = $('#remote-off'); if (b) b.addEventListener('click', () => remoteDown(true)); }
+    { const t = $('#remote-serve-toggle'); if (t) t.addEventListener('change', (e) => remoteServe(e.target.checked)); }
+    // The test box is deliberately inert — it exists so you can see what the
+    // keys DO before you trust the layout with a password. Clear it on blur so
+    // a half-typed password fragment never sits on screen.
+    { const t = $('#kb-test'); if (t) t.addEventListener('blur', () => { t.value = ''; }); }
     { const i = $('#ssh-key-in'); if (i) i.addEventListener('keydown', (e) => { if (e.key === 'Enter') sshAddKey(); }); }
     { const b = $('#fw-allow'); if (b) b.addEventListener('click', () => firewallAdd('allow')); }
     { const b = $('#fw-deny'); if (b) b.addEventListener('click', () => firewallAdd('deny')); }

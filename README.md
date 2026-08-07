@@ -80,6 +80,11 @@ address, a public address or a wildcard bind is **refused, and the daemon exits*
 That is stronger than a firewall rule: the socket is never created on those
 interfaces at all, so there is no rule to get wrong or forget after a reboot.
 
+The **Remote Access** screen drives all of it: join the tailnet, move the panel
+onto it, turn on HTTPS, or leave again. Anything that would cut off the person
+clicking it says so and asks first. The same steps from a terminal — which is what
+you want in lean mode, or over SSH:
+
 ```
 sudo outlaw remote up        # join your Tailscale network — prints a sign-in link
 sudo outlaw remote bind tunnel
@@ -101,6 +106,19 @@ install time, and `outlaw remote off` puts the machine back to nothing running a
 nothing listening. It is worth being straight about this one: a tunnel daemon is a
 real process with real (small) memory use and periodic keepalive traffic — that is
 the honest price of being reachable, and it is why it is opt-in rather than on.
+
+### The keyboard you type the password with
+
+**Settings → Keyboard layout** sets the layout for the **text console** — where
+you type the root password when there's no graphical panel, including in lean
+mode — as well as for the panel itself. It uses `localectl`, so it persists
+across reboots and covers both surfaces; the X-session-only approach a desktop
+uses would reset at every login and do nothing for the console at all.
+
+Symbols move between layouts (`@` and `"` swap between UK and US), and you
+normally discover this while typing a password you can't see — so there's a test
+box next to the picker. Nothing you type in it is saved or sent anywhere.
+From a terminal: `outlaw keyboard list`, `sudo outlaw keyboard set gb`.
 
 ### Server software
 

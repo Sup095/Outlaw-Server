@@ -170,11 +170,11 @@ window.OUTLAW_HELP = [
             + 'It’s free for personal use, and it means your control panel is never exposed to '
             + 'the open internet — there is no public address to find and nothing to '
             + 'port-forward.</p>'
-            + '<p>Run this at the machine or over SSH:</p>'
+            + '<p>The <b>Remote Access</b> screen has two buttons for it: <b>Join the tailnet</b>, '
+            + 'then <b>Move the panel onto the tunnel</b>. Joining shows a <b>sign-in link</b> — '
+            + 'open it in any browser, log in to Tailscale, and press Refresh.</p>'
+            + '<p>The same thing from a terminal, which is what you want in lean mode:</p>'
             + '<pre>sudo outlaw remote up\nsudo outlaw remote bind tunnel</pre>'
-            + '<p><code>remote up</code> prints a <b>sign-in link</b>. Open it in any browser, log '
-            + 'in to Tailscale, and the machine joins your tailnet. <code>remote bind tunnel</code> '
-            + 'then moves the panel onto that tunnel address.</p>'
             + '<p>Install Tailscale on your laptop or phone, sign in to the same account, and the '
             + 'panel is reachable from there and nowhere else. The <b>Remote Access</b> screen '
             + 'shows exactly where things stand.</p>',
@@ -194,8 +194,12 @@ window.OUTLAW_HELP = [
     {
         id: 'remote-serve', cat: 'Remote access', title: 'HTTPS and a real hostname',
         keywords: 'https tls certificate padlock serve hostname ts.net letsencrypt magicdns name',
-        body: '<p>Want a padlock and a memorable name instead of an IP?</p>'
+        body: '<p>Want a padlock and a memorable name instead of an IP? Turn on '
+            + '<b>Remote Access → Tailscale HTTPS proxy</b>, or from a terminal:</p>'
             + '<pre>sudo outlaw remote serve on</pre>'
+            + '<p>If it refuses, it is almost always because HTTPS certificates aren’t enabled '
+            + 'for your tailnet yet — turn them on in the Tailscale admin console under '
+            + '<b>DNS → HTTPS Certificates</b>. The panel shows Tailscale’s own error either way.</p>'
             + '<p>This puts Tailscale’s own HTTPS proxy in front of the panel — a free '
             + 'Let’s Encrypt certificate for the machine’s <code>*.ts.net</code> name — while the '
             + 'daemon itself stays on loopback.</p>'
@@ -220,10 +224,13 @@ window.OUTLAW_HELP = [
         keywords: 'off down disable stop tailscaled leave tailnet idle cost overhead opt in',
         body: '<p>Remote access is <b>off until you ask for it</b>. <code>tailscaled</code> is not '
             + 'enabled at install time.</p>'
-            + '<ul><li><code>sudo outlaw remote down</code> — leave the tailnet, but '
-            + '<code>tailscaled</code> keeps running.</li>'
-            + '<li><code>sudo outlaw remote off</code> — leave <b>and</b> stop the daemon: back to '
+            + '<p>On <b>Remote Access → Turn it off</b>, or from a terminal:</p>'
+            + '<ul><li><b>Leave the tailnet</b> (<code>sudo outlaw remote down</code>) — off the '
+            + 'tailnet, but <code>tailscaled</code> keeps running.</li>'
+            + '<li><b>Leave and stop tailscaled</b> (<code>sudo outlaw remote off</code>) — back to '
             + 'nothing running and nothing listening.</li></ul>'
+            + '<p>Both cut off <i>your own</i> connection if you are reading this over the tunnel, '
+            + 'so the panel asks you to confirm first.</p>'
             + '<p>Worth being straight about: a tunnel daemon is a real process with real (small) '
             + 'memory use and periodic keepalive traffic. That’s the honest price of being '
             + 'reachable, and it’s why it’s opt-in rather than on.</p>'
@@ -349,6 +356,23 @@ window.OUTLAW_HELP = [
             + '<code>environment=</code>, <code>permitopen=</code>) are refused. Those run code on '
             + 'every login, and pasting one you didn’t write is a well-known way to be handed a '
             + 'backdoor. Add those by hand if you truly mean to.</p>',
+    },
+    {
+        id: 'keyboard', cat: 'System tools', title: 'Keyboard layout',
+        keywords: 'keyboard layout keymap console vconsole localectl symbols password at sign uk us qwerty azerty',
+        body: '<p><b>Settings → Keyboard layout</b> sets which physical keyboard is plugged into '
+            + '<b>this machine</b>. It covers the <b>text console</b> — where you type the root '
+            + 'password when there is no graphical panel, including in lean mode — as well as the '
+            + 'panel itself.</p>'
+            + '<p>It does <b>not</b> change the keyboard on a laptop you connect from. That stays '
+            + 'whatever your own computer uses.</p>'
+            + '<p>Getting it wrong is quietly painful, because the symbols move. A UK keyboard set '
+            + 'to US swaps <code>@</code> and <code>"</code> — which you discover while typing a '
+            + 'password you can’t see. <b>Use the test box before you rely on it.</b></p>'
+            + '<p>The setting is saved immediately, but the graphical panel only picks it up after '
+            + 'a log out or reboot; the panel tells you which happened.</p>'
+            + '<p>From a terminal: <code>outlaw keyboard</code>, <code>outlaw keyboard list</code>, '
+            + '<code>sudo outlaw keyboard set gb</code>.</p>',
     },
     {
         id: 'tasks', cat: 'System tools', title: 'Task Manager',

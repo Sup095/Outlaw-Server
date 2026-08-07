@@ -36,6 +36,9 @@ outlaw — Outlaw Server control
                              the 2FA secret to enrol in your authenticator app)
   outlaw 2fa <user> <code>   Confirm 2FA — required before it is enforced
   outlaw audit [n]           Recent sign-in / privileged-action records
+  outlaw keyboard            Keyboard layout: status | list | set <layout>
+                             (sets the text console AND the panel — this is what
+                             you type the root password with)
   outlaw help                This text
 
 Remote access (reach this machine from anywhere, over an encrypted tunnel):
@@ -201,6 +204,44 @@ case "${1:-help}" in
             if (!r.ok) { console.error(r.error); process.exit(1); }
             console.log("Two-factor authentication confirmed and now REQUIRED at sign-in.");
         ' "$SERVERD_DIR" "$user" "$code"
+        ;;
+    keyboard|kb)
+        # Which physical keyboard is plugged into THIS machine. Matters most at
+        # the text console, where the root password is typed and there is no
+        # panel to fall back on — so it has to work in lean mode too.
+        case "${2:-status}" in
+            status|"")
+                node -e '
+                    const { dispatch } = require(process.argv[1] + "/ops");
+                    dispatch("keyboard:status", {}, {}).then((r) => {
+                        if (!r.available) { console.error(r.error || "unavailable"); process.exit(1); }
+                        console.log("Panel (X11):   " + (r.x11 || "unknown"));
+                        console.log("Text console:  " + (r.console || "unknown"));
+                        console.log("");
+                        console.log(r.layouts.length + " layouts available — `outlaw keyboard list` to see them.");
+                    });
+                ' "$SERVERD_DIR"
+                ;;
+            list)
+                node -e '
+                    const { dispatch } = require(process.argv[1] + "/ops");
+                    dispatch("keyboard:status", {}, {}).then((r) => {
+                        if (!r.available) { console.error(r.error || "unavailable"); process.exit(1); }
+                        for (const l of r.layouts) {
+                            console.log("  " + l.code.padEnd(10) + (l.label === l.code ? "" : l.label));
+                        }
+                    });
+                ' "$SERVERD_DIR"
+                ;;
+            set)
+                want="${3:-}"
+                if [[ -z "$want" ]]; then echo "usage: outlaw keyboard set <layout>   (see: outlaw keyboard list)" >&2; exit 2; fi
+                need_root keyboard set "$want"
+                op "keyboard:set" "$(printf '{"layout":"%s"}' "$want")"
+                ;;
+            *)
+                echo "usage: outlaw keyboard {status|list|set <layout>}" >&2; exit 2 ;;
+        esac
         ;;
     remote)
         case "${2:-status}" in

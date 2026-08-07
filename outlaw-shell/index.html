@@ -295,10 +295,31 @@
             </div>
             <div class="card">
                 <h3>Set it up</h3>
-                <p class="muted" style="margin:0 0 10px;">Joining a tailnet needs a one-time sign-in from any browser. Run this at the machine (or over SSH):</p>
-                <pre class="mono" style="margin:0 0 10px;padding:10px;background:var(--bg2,#0a0a0a);border:1px solid var(--line);overflow:auto;">sudo outlaw remote up
-sudo outlaw remote bind tunnel</pre>
-                <div id="remote-auth" class="muted mono" style="word-break:break-all;"></div>
+                <p class="muted" style="margin:0 0 10px;">Two steps: join your tailnet, then move the panel onto it. Joining needs a one-time sign-in — a link appears below for you to open on any device.</p>
+                <div class="row" style="gap:8px;flex-wrap:wrap;">
+                    <button id="remote-up" class="primary" type="button">1 · Join the tailnet</button>
+                    <button id="remote-bind-tunnel" type="button">2 · Move the panel onto the tunnel</button>
+                    <button id="remote-bind-loopback" type="button">Back to this machine only</button>
+                </div>
+                <div id="remote-auth" class="muted mono" role="status" aria-live="polite" style="word-break:break-all;margin-top:10px;"></div>
+                <div id="remote-msg" class="muted mono" role="status" aria-live="polite" aria-atomic="true" style="margin-top:8px;word-break:break-word;"></div>
+            </div>
+
+            <div class="card">
+                <h3>HTTPS and a real name</h3>
+                <div class="setting">
+                    <div class="label">Tailscale HTTPS proxy<small id="remote-serve-sub">Puts a free certificate and the machine's <span class="mono">*.ts.net</span> name in front of the panel. Changes nothing about who can reach it.</small></div>
+                    <label class="switch"><input type="checkbox" id="remote-serve-toggle" aria-label="Tailscale HTTPS proxy"><span class="track"></span></label>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Turn it off</h3>
+                <p class="muted" style="margin:0 0 10px;">Leaving the tailnet makes this machine unreachable from anywhere else. If you are reading this <b>over the tunnel</b>, that includes you — you'll need the machine's own keyboard, or SSH on the local network, to get back.</p>
+                <div class="row" style="gap:8px;flex-wrap:wrap;">
+                    <button id="remote-down" class="danger" type="button">Leave the tailnet</button>
+                    <button id="remote-off" class="danger" type="button">Leave and stop tailscaled</button>
+                </div>
             </div>
         </section>
 
@@ -535,6 +556,26 @@ sudo outlaw remote bind tunnel</pre>
                 <div id="region-msg" class="muted" aria-live="polite" style="font-size:12px;min-height:14px;"></div>
             </div>
 
+            <div class="card" id="keyboard-card">
+                <h3>Keyboard layout</h3>
+                <details class="page-help">
+                    <summary>What is this?</summary>
+                    <p>Which physical keyboard is plugged into <b>this machine</b>. It sets the <b>text console</b> (where you type the root password when there's no graphical panel — including in lean mode) as well as the panel itself. It does <b>not</b> affect the keyboard on a laptop you connect from; that stays whatever your own computer uses.</p>
+                    <p>Getting it wrong is quietly painful: symbols move. On a UK keyboard set to US, <span class="mono">@</span> and <span class="mono">"</span> swap — which you find out while typing a password you can't see. <b>Use the test box below before you rely on it.</b></p>
+                </details>
+                <div class="setting">
+                    <div class="label">Layout<small id="kb-sub">Reading the current layout…</small></div>
+                    <select id="kb-select" aria-label="Keyboard layout" style="width:auto;min-width:220px;"></select>
+                </div>
+                <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px;">
+                    <button id="kb-apply" class="primary" type="button" disabled>Apply layout</button>
+                    <input id="kb-test" placeholder="Test here: @ # &quot; ~ £ € \ | / ?" aria-label="Type here to test the keyboard layout — nothing is saved"
+                           autocomplete="off" spellcheck="false" style="flex:1 1 260px;min-width:200px;">
+                </div>
+                <div class="dim" style="font-size:11px;margin-top:6px;">Nothing you type in the test box is saved or sent anywhere.</div>
+                <div id="kb-msg" class="muted mono" role="status" aria-live="polite" aria-atomic="true" style="margin-top:8px;word-break:break-word;"></div>
+            </div>
+
 
 
 
@@ -721,10 +762,9 @@ sudo outlaw remote bind tunnel</pre>
             <div class="card">
                 <h3>Boot &amp; Recovery</h3>
                 <div class="row">
-                    <button data-action="hotswap">⇄ Hotswap to another OS</button>
                     <button data-action="installer">Open Installer</button>
                 </div>
-                <div class="muted" style="margin-top:8px;">Hotswap sets the next boot to another installed OS (or opens the boot menu). The installer can set up or remove Outlaw Server — your other OS and data stay untouched unless you explicitly choose to wipe.</div>
+                <div class="muted" style="margin-top:8px;">The installer can set up or remove Outlaw Server — your other OS and data stay untouched unless you explicitly choose to wipe.</div>
             </div>
 
             <div class="card" id="report-card">
@@ -777,7 +817,6 @@ sudo outlaw remote bind tunnel</pre>
         <h3 id="power-title">Power</h3>
         <div class="row">
             <button data-action="lock">🔒 Lock</button>
-            <button data-action="hotswap">⇄ Hotswap</button>
             <button data-action="reboot">↻ Reboot</button>
             <button class="danger" data-action="shutdown">⏻ Shutdown</button>
             <button data-action="power-cancel">Cancel</button>
