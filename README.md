@@ -54,7 +54,7 @@ guarded terminal.
 | ✅ | **2 · Sign-in that means it** | Password (scrypt) + TOTP 2FA, revocable server-side sessions, per-IP lockout, audit log. |
 | ✅ | **3 · Remote access** | Tailscale/WireGuard — manage every box from anywhere, with nothing on the public internet. |
 | ✅ | **4 · Server toolset** | Services, journal viewer, firewall, SSH keys and storage — all reachable from either frontend. |
-| 🚧 | **5 · Game servers** | Docker, Portainer and Cockpit install in one click and are fully removable. Pterodactyl is next. |
+| ✅ | **5 · Game servers** | One-click Docker, Portainer and Cockpit, plus a guided Pterodactyl install. All removable. |
 | 🔭 | **6 · Polish & first install** | Accessibility pass, docs, and the first real-hardware test. |
 
 ### Signing in
@@ -117,6 +117,30 @@ Each can be **stopped without uninstalling** (frees the memory, keeps the setup)
 removed outright. **Removing never deletes your data** — container volumes and
 `/var/lib/docker` are left exactly as they are, so anything you were running can be
 brought straight back.
+
+### Game servers (Pterodactyl)
+
+[Pterodactyl](https://pterodactyl.io) is the game-server manager: a web panel where
+you create Minecraft, Rust, Valheim and dozens of other servers, edit configs, watch
+consoles and give friends access — without touching a terminal.
+
+```
+sudo outlaw-pterodactyl panel --fqdn your-box.ts.net --email you@example.com
+sudo outlaw-pterodactyl wings
+```
+
+**This one is not a single button, and the reason is worth being straight about.**
+It installs a database, a PHP runtime, a web server, a queue worker and a scheduled
+job, and it asks you questions partway through. That is a ten-minute operation you
+should be able to watch — so it's a script you run and read, not a spinner over a
+process you can't see. It **stops at the first thing that fails**, showing the exact
+command and error, and it is **re-runnable**: every step checks whether its work is
+already done, so a run that dies halfway can be fixed and started again.
+
+Two things it deliberately does **not** do: it never opens a firewall port (that
+stays your decision, on the Firewall screen), and it doesn't obtain a TLS
+certificate — inside a tailnet the tunnel already encrypts everything, and on a
+public domain that's a decision of its own.
 
 ### Your server, your overhead
 

@@ -20,7 +20,7 @@ RELENG="/usr/share/archiso/configs/releng"
 # Default version baked in for local builds. CI overrides this from the git
 # tag via OUTLAW_ISO_VERSION (see .github/workflows/build-iso.yml) so the
 # artifact filename always matches the tag the user pushed.
-ISO_VERSION="${OUTLAW_ISO_VERSION:-0.8.0}"
+ISO_VERSION="${OUTLAW_ISO_VERSION:-0.8.1}"
 ISO_FINAL="$OUT_DIR/outlaw-server-v${ISO_VERSION}.iso"
 
 echo "========================================"
@@ -164,7 +164,7 @@ sed -i \
 for f in outlaw outlaw-install outlaw-install-aur outlaw-electron-flags \
          outlaw-firstboot outlaw-start-session outlaw-hotswap outlaw-perf \
          outlaw-tune outlaw-update-apply outlaw-update-rollback \
-         outlaw-session-watchdog \
+         outlaw-session-watchdog outlaw-pterodactyl \
          outlaw-diagnose outlaw-focus outlaw-term \
          outlaw-install-gui outlaw-pkg-install outlaw-update-pkgs \
          outlaw-driver-profile outlaw-swap; do

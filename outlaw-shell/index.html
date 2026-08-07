@@ -340,6 +340,29 @@ sudo outlaw remote bind tunnel</pre>
             </div>
 
             <div class="card">
+                <div class="row" style="align-items:center;"><h3 style="margin:0;">Pterodactyl (game servers)</h3><span class="spacer"></span>
+                    <button data-action="ptero-refresh">↻</button>
+                </div>
+                <details class="page-help">
+                    <summary>What is this?</summary>
+                    <p><b>Pterodactyl</b> is the game-server manager: a web panel where you create Minecraft, Rust, Valheim (and dozens of other) servers, edit their configs, watch their consoles and give friends access — without touching a terminal.</p>
+                    <p>It comes in two halves. The <b>panel</b> is the web interface. <b>Wings</b> is the daemon that actually runs each game server inside Docker. Both go on this machine for a single-box setup.</p>
+                    <p><b>This one is not a single button, and the honest reason is worth saying:</b> it installs a database, a PHP runtime, a web server, a queue worker and a scheduled job, and it asks you questions partway through. It takes about ten minutes and you should be able to watch it. So the panel hands you the command instead of hiding it — and the script stops at the first thing that fails, showing exactly what went wrong.</p>
+                </details>
+                <div id="ptero-status" class="mono" style="line-height:1.7;">Checking…</div>
+                <div style="margin-top:10px;">
+                    <div class="dim" style="font-size:11px;margin-bottom:4px;">1 · Install the panel — replace the hostname and email with your own:</div>
+                    <pre class="mono" style="margin:0 0 10px;padding:10px;background:var(--bg2,#0a0a0a);border:1px solid var(--line);overflow:auto;">sudo outlaw-pterodactyl panel --fqdn your-box.ts.net --email you@example.com</pre>
+                    <div class="dim" style="font-size:11px;margin-bottom:4px;">2 · Install the daemon that runs the game servers:</div>
+                    <pre class="mono" style="margin:0;padding:10px;background:var(--bg2,#0a0a0a);border:1px solid var(--line);overflow:auto;">sudo outlaw-pterodactyl wings</pre>
+                    <div class="dim" style="font-size:11px;margin-top:10px;">
+                        Neither step opens a firewall port — that stays your decision, on the Firewall screen.
+                        Game servers each need their own port opened once you create them.
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
                 <div class="muted">
                     Anything else from the official Arch repos can be installed below —
                     handy for tools a particular server needs. Use <span class="mono">↻ Refresh package list</span>

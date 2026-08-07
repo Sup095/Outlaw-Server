@@ -585,7 +585,7 @@ function showScreen(name) {
     if (name === 'files') { _fsFilter = ''; const ff = $('#fs-filter'); if (ff) ff.value = ''; loadFiles(currentDir || null); }
     if (name === 'tasks') { refreshTasks(); startTasksPoll(); } else { stopTasksPoll(); }
     if (name === 'dashboard') { renderRecentApps(); refreshDisks(); }
-    if (name === 'apps') { refreshServerApps(); loadAppsCatalog(); const as = $('#apps-search'); if (as) as.focus(); }
+    if (name === 'apps') { refreshServerApps(); refreshPterodactyl(); loadAppsCatalog(); const as = $('#apps-search'); if (as) as.focus(); }
     if (name === 'help') { renderHelp(($('#help-search') || {}).value || ''); const hs = $('#help-search'); if (hs) hs.focus(); }
     if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); refreshSshKeys(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
     if (name === 'ai') $('#ai-in').focus();
@@ -839,6 +839,22 @@ async function serverAppAction(id, action) {
     if (r.ok === false) { _appsMsg(r.error || `Could not ${action} ${id}.`); toast(`${id}: ${action} failed.`); }
     else { _appsMsg(r.note || `${id}: done.`); toast(`${id} ${action === 'install' ? 'installed' : action === 'remove' ? 'removed' : action + 'ed'}.`); }
     refreshServerApps();
+}
+
+async function refreshPterodactyl() {
+    const box = $('#ptero-status');
+    if (!box) return;
+    const r = await op('ptero:status');
+    if (unreadable(r)) {
+        box.innerHTML = `<span class="muted">Couldn't check: ${_escapeHtml(r.error || 'unknown')}</span>`;
+        return;
+    }
+    const line = (label, val, on) =>
+        `<div><span class="dim" style="display:inline-block;min-width:70px;">${label}</span>`
+        + `<span class="badge${on ? ' on' : ''}">${_escapeHtml(val)}</span></div>`;
+    box.innerHTML = line('Panel', r.panelInstalled ? 'installed' : 'not installed', r.panelInstalled)
+        + line('Wings', r.wingsPresent ? 'installed' : 'not installed', r.wingsPresent)
+        + (r.report ? `<pre class="dim" style="margin:8px 0 0;font-size:11px;white-space:pre-wrap;">${_escapeHtml(r.report)}</pre>` : '');
 }
 
 // --- Storage (dashboard card) -----------------------------------------------
@@ -3159,6 +3175,7 @@ function wire() {
             case 'remote-refresh': refreshRemote(); break;
             case 'disk-refresh': refreshDisks(); break;
             case 'server-apps-refresh': refreshServerApps(); break;
+            case 'ptero-refresh': refreshPterodactyl(); break;
             case 'ai-send': sendAI(); break;
             case 'updates-check': {
                 $('#update-status').textContent = 'checking…';

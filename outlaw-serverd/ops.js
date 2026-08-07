@@ -608,6 +608,29 @@ const ops = {
     // asks for" would turn a signed-in session into arbitrary root package
     // installation.
 
+    // Pterodactyl is installed by /usr/local/bin/outlaw-pterodactyl, not from
+    // here. It is a ten-minute job that asks questions (the first admin's
+    // username and password) and must be watchable while it runs — driving that
+    // through a web request would mean a spinner over a process nobody can see,
+    // and no way to answer it. The panel reports STATUS and hands over the exact
+    // command; the script is readable, re-runnable, and stops at the first
+    // failure with the real error.
+    'ptero:status': async () => {
+        if (!IS_LINUX) return { ok: true, available: false, error: 'Runs on Outlaw Server.' };
+        const r = await run('/usr/local/bin/outlaw-pterodactyl', ['status'], { timeout: 20000 });
+        if (!r.ok) {
+            return { ok: true, available: false, error: (r.stderr || r.stdout || 'could not read Pterodactyl status').trim().slice(-200) };
+        }
+        const out = r.stdout;
+        return {
+            ok: true,
+            available: true,
+            panelInstalled: /Panel\s*:\s*installed/.test(out),
+            wingsPresent: /wings\s*:/.test(out),
+            report: out.trim(),
+        };
+    },
+
     'apps:catalog': async () => {
         const out = [];
         for (const [id, app] of Object.entries(SERVER_APPS)) {
@@ -740,7 +763,7 @@ const ops = {
             serve: cfg.trustProxy === true,
             // Honest statement of what this build can do yet.
             phase: 5,
-            note: 'Phase 5 (partial): the full server toolset, plus one-click Docker, Portainer and Cockpit. Pterodactyl is next.',
+            note: 'Phase 5: the full server toolset, one-click Docker/Portainer/Cockpit, and a guided Pterodactyl install (outlaw-pterodactyl).',
         };
     },
 };
