@@ -585,7 +585,7 @@ function showScreen(name) {
     if (name === 'files') { _fsFilter = ''; const ff = $('#fs-filter'); if (ff) ff.value = ''; loadFiles(currentDir || null); }
     if (name === 'tasks') { refreshTasks(); startTasksPoll(); } else { stopTasksPoll(); }
     if (name === 'dashboard') { renderRecentApps(); refreshDisks(); }
-    if (name === 'apps') { loadAppsCatalog(); const as = $('#apps-search'); if (as) as.focus(); }
+    if (name === 'apps') { refreshServerApps(); loadAppsCatalog(); const as = $('#apps-search'); if (as) as.focus(); }
     if (name === 'help') { renderHelp(($('#help-search') || {}).value || ''); const hs = $('#help-search'); if (hs) hs.focus(); }
     if (name === 'settings') { const ss = $('#settings-search'); if (ss) ss.value = ''; filterSettings(''); refreshNetStatus(); refreshSwapStatus(); refreshAirplane(); refreshRegionUi(); refreshSshKeys(); if (window._refreshSecurityUi) window._refreshSecurityUi(); }
     if (name === 'ai') $('#ai-in').focus();
@@ -791,6 +791,54 @@ async function firewallDelete(num) {
     _fwMsg(r.ok === false ? (r.error || 'Could not delete that rule.') : `Rule ${num} deleted.`);
     if (r.ok !== false) toast(`Firewall rule ${num} deleted.`);
     refreshFirewall();
+}
+
+// --- Server software (Phase 5) ----------------------------------------------
+function _appsMsg(t) { const el = $('#server-apps-msg'); if (el) el.textContent = t || ''; }
+
+async function refreshServerApps() {
+    const box = $('#server-apps');
+    if (!box) return;
+    const r = await op('apps:catalog');
+    if (unreadable(r)) {
+        box.innerHTML = `<div class="muted">Couldn't check what's installed: ${_escapeHtml(r.error || 'unknown')}</div>`;
+        return;
+    }
+    box.innerHTML = (r.apps || []).map((a) => {
+        const state = a.installed ? (a.running ? 'running' : 'installed, stopped') : 'not installed';
+        return `<div class="setting">
+            <div class="label">${_escapeHtml(a.name)}
+                <small>${_escapeHtml(a.blurb || '')}${a.note ? ' <i>' + _escapeHtml(a.note) + '</i>' : ''}</small>
+            </div>
+            <div class="row" style="gap:6px;align-items:center;white-space:nowrap;">
+                <span class="badge${a.running ? ' on' : ''}">${_escapeHtml(state)}</span>
+                ${a.installed
+        ? `<button data-app="${a.id}" data-app-action="${a.running ? 'stop' : 'start'}">${a.running ? 'Stop' : 'Start'}</button>
+                     <button class="danger" data-app="${a.id}" data-app-action="remove">Remove</button>`
+        : `<button class="primary" data-app="${a.id}" data-app-action="install">Install</button>`}
+            </div>
+        </div>`;
+    }).join('') || '<div class="muted">No server software listed.</div>';
+}
+
+async function serverAppAction(id, action) {
+    if (action === 'remove') {
+        const go = await askConfirm({
+            title: `Remove ${id}?`,
+            reason: 'The software is uninstalled. Your data is NOT deleted — container volumes and /var/lib/docker are left exactly as they are, so anything running on top of this can be brought back.',
+            cmd: `remove ${id}`,
+        });
+        if (!go) return;
+    }
+    _appsMsg(`${action === 'install' ? 'Installing' : action === 'remove' ? 'Removing' : action === 'start' ? 'Starting' : 'Stopping'} ${id}… this can take a while.`);
+    let r;
+    if (action === 'install') r = await op('apps:install', { id });
+    else if (action === 'remove') r = await op('apps:remove', { id });
+    else r = await op('apps:set-running', { id, running: action === 'start' });
+
+    if (r.ok === false) { _appsMsg(r.error || `Could not ${action} ${id}.`); toast(`${id}: ${action} failed.`); }
+    else { _appsMsg(r.note || `${id}: done.`); toast(`${id} ${action === 'install' ? 'installed' : action === 'remove' ? 'removed' : action + 'ed'}.`); }
+    refreshServerApps();
 }
 
 // --- Storage (dashboard card) -----------------------------------------------
@@ -3089,6 +3137,8 @@ function wire() {
         if (svcBtn) { serviceAction(svcBtn.dataset.svc, svcBtn.dataset.svcAction); return; }
         const fwDel = e.target.closest('[data-fw-del]');
         if (fwDel) { firewallDelete(fwDel.dataset.fwDel); return; }
+        const appBtn = e.target.closest('[data-app-action]');
+        if (appBtn) { serverAppAction(appBtn.dataset.app, appBtn.dataset.appAction); return; }
         const sshDel = e.target.closest('[data-ssh-del]');
         if (sshDel) { sshRemoveKey(sshDel.dataset.sshDel); return; }
 
@@ -3108,6 +3158,7 @@ function wire() {
             case 'fw-refresh': refreshFirewall(); break;
             case 'remote-refresh': refreshRemote(); break;
             case 'disk-refresh': refreshDisks(); break;
+            case 'server-apps-refresh': refreshServerApps(); break;
             case 'ai-send': sendAI(); break;
             case 'updates-check': {
                 $('#update-status').textContent = 'checking…';

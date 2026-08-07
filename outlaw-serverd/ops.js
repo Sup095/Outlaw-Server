@@ -109,6 +109,149 @@ function authorizedKeysPath(u) {
 }
 
 // ============================================================================
+// Server software (Phase 5)
+// ============================================================================
+// A FIXED allowlist. The caller picks an id from this table; it never supplies
+// a package name. Anything else would make a signed-in session equivalent to
+// arbitrary root package installation.
+//
+// pacman runs --noconfirm because nothing is attached to answer a prompt, and
+// --needed so re-running an install is a no-op rather than a reinstall.
+
+function pacman(args) {
+    return run('pacman', ['--noconfirm', ...args], { timeout: 600000 });
+}
+
+async function unitActive(unit) {
+    const r = await run('systemctl', ['is-active', unit], { timeout: 5000 });
+    return r.stdout.trim() === 'active';
+}
+
+async function pkgInstalled(name) {
+    const r = await run('pacman', ['-Q', name], { timeout: 8000 });
+    return r.ok;
+}
+
+// Portainer is a container, not a package — its presence is a docker question.
+async function containerState(name) {
+    const r = await run('docker', ['ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.State}}'], { timeout: 15000 });
+    if (!r.ok) return { present: false, running: false };
+    const s = r.stdout.trim();
+    return { present: !!s, running: s === 'running' };
+}
+
+const SERVER_APPS = {
+    docker: {
+        meta: {
+            name: 'Docker',
+            blurb: 'Runs software in isolated containers. Pterodactyl and Portainer both need it.',
+            note: 'Adds a background service. Leave it off until something needs it.',
+        },
+        install: async () => {
+            const r = await pacman(['-S', '--needed', 'docker', 'docker-compose']);
+            if (!r.ok) return { ok: false, error: (r.stderr || r.stdout || 'pacman failed').trim().slice(-300) };
+            const e = await run('systemctl', ['enable', '--now', 'docker'], { timeout: 60000 });
+            if (!e.ok) return { ok: false, error: (e.stderr || 'installed, but the docker service would not start').trim().slice(-300) };
+            return { ok: true };
+        },
+        remove: async () => {
+            await run('systemctl', ['disable', '--now', 'docker'], { timeout: 60000 });
+            // -Rs removes the package and any dependencies nothing else needs.
+            // Images and volumes under /var/lib/docker are deliberately LEFT —
+            // silently deleting someone's game-server data because they removed
+            // a package would be unforgivable.
+            const r = await pacman(['-Rs', 'docker', 'docker-compose']);
+            return r.ok
+                ? { ok: true, note: 'Docker removed. Container data in /var/lib/docker was left untouched.' }
+                : { ok: false, error: (r.stderr || r.stdout || 'pacman failed').trim().slice(-300) };
+        },
+        setRunning: async (on) => {
+            const r = await run('systemctl', [on ? 'start' : 'stop', 'docker'], { timeout: 60000 });
+            return r.ok ? { ok: true, running: on } : { ok: false, error: (r.stderr || 'systemctl failed').trim().slice(-250) };
+        },
+        status: async () => ({ installed: await pkgInstalled('docker'), running: await unitActive('docker') }),
+    },
+
+    cockpit: {
+        meta: {
+            name: 'Cockpit',
+            blurb: 'A classic Linux admin console in the browser — users, storage, networking, terminal.',
+            note: 'Socket-activated: it uses nothing until you open it.',
+        },
+        install: async () => {
+            const r = await pacman(['-S', '--needed', 'cockpit']);
+            if (!r.ok) return { ok: false, error: (r.stderr || r.stdout || 'pacman failed').trim().slice(-300) };
+            // The SOCKET, not the service: systemd starts cockpit only when a
+            // browser actually connects, so an idle server pays nothing.
+            const e = await run('systemctl', ['enable', '--now', 'cockpit.socket'], { timeout: 60000 });
+            if (!e.ok) return { ok: false, error: (e.stderr || 'installed, but cockpit.socket would not start').trim().slice(-300) };
+            return { ok: true, note: 'Cockpit listens on port 9090. Open the firewall for it if you want it reachable.' };
+        },
+        remove: async () => {
+            await run('systemctl', ['disable', '--now', 'cockpit.socket'], { timeout: 60000 });
+            const r = await pacman(['-Rs', 'cockpit']);
+            return r.ok ? { ok: true } : { ok: false, error: (r.stderr || r.stdout || 'pacman failed').trim().slice(-300) };
+        },
+        setRunning: async (on) => {
+            const r = await run('systemctl', [on ? 'start' : 'stop', 'cockpit.socket'], { timeout: 60000 });
+            return r.ok ? { ok: true, running: on } : { ok: false, error: (r.stderr || 'systemctl failed').trim().slice(-250) };
+        },
+        status: async () => ({ installed: await pkgInstalled('cockpit'), running: await unitActive('cockpit.socket') }),
+    },
+
+    portainer: {
+        meta: {
+            name: 'Portainer',
+            blurb: 'A point-and-click manager for Docker containers, images and volumes.',
+            note: 'Needs Docker. Runs as a container itself.',
+            requires: 'docker',
+        },
+        install: async () => {
+            if (!await unitActive('docker')) {
+                return { ok: false, error: 'Docker must be installed and running first.' };
+            }
+            const vol = await run('docker', ['volume', 'create', 'portainer_data'], { timeout: 60000 });
+            if (!vol.ok) return { ok: false, error: (vol.stderr || 'could not create the portainer_data volume').trim().slice(-300) };
+            const r = await run('docker', [
+                'run', '-d',
+                '--name', 'portainer',
+                '--restart=always',
+                // Bound to LOOPBACK on purpose. Portainer can control every
+                // container on the box, so it does not go on a network
+                // interface by default — reach it through the tunnel or an SSH
+                // port-forward, exactly like the panel itself.
+                '-p', '127.0.0.1:9443:9443',
+                '-v', '/var/run/docker.sock:/var/run/docker.sock',
+                '-v', 'portainer_data:/data',
+                'portainer/portainer-ce:latest',
+            ], { timeout: 600000 });
+            if (!r.ok) return { ok: false, error: (r.stderr || r.stdout || 'docker run failed').trim().slice(-300) };
+            return { ok: true, note: 'Portainer is on https://127.0.0.1:9443 — loopback only, so reach it over your tunnel.' };
+        },
+        remove: async () => {
+            await run('docker', ['rm', '-f', 'portainer'], { timeout: 120000 });
+            // The volume holds Portainer's own users/settings, not container
+            // data. Still left behind: removing it is not ours to decide.
+            return { ok: true, note: 'Portainer removed. Its settings volume (portainer_data) was left in place.' };
+        },
+        setRunning: async (on) => {
+            const r = await run('docker', [on ? 'start' : 'stop', 'portainer'], { timeout: 120000 });
+            return r.ok ? { ok: true, running: on } : { ok: false, error: (r.stderr || 'docker failed').trim().slice(-250) };
+        },
+        status: async () => {
+            const c = await containerState('portainer');
+            return { installed: c.present, running: c.running };
+        },
+    },
+};
+
+async function serverAppStatus(id, app) {
+    if (!IS_LINUX) return { installed: false, running: false, unavailable: true };
+    try { return await app.status(); }
+    catch (e) { return { installed: false, running: false, error: (e && e.message) || String(e) }; }
+}
+
+// ============================================================================
 // Operations
 // ============================================================================
 const ops = {
@@ -455,6 +598,51 @@ const ops = {
         return { ok: true, deleted: n };
     },
 
+    // --- server software (Phase 5) -----------------------------------------
+    // The things a server actually runs, installed on demand so the base image
+    // stays small and nobody pays for what they didn't ask for. Every one of
+    // these is removable — that was a hard requirement, not a nicety.
+    //
+    // These are the ONLY package names this daemon will ever install. It is a
+    // fixed allowlist, not a caller-supplied name: "install whatever the panel
+    // asks for" would turn a signed-in session into arbitrary root package
+    // installation.
+
+    'apps:catalog': async () => {
+        const out = [];
+        for (const [id, app] of Object.entries(SERVER_APPS)) {
+            const st = await serverAppStatus(id, app);
+            out.push({ id, ...app.meta, ...st });
+        }
+        // Carry a reason with `available:false` — a bare flag makes the UI say
+        // "unknown", which tells nobody anything.
+        return IS_LINUX
+            ? { ok: true, available: true, apps: out }
+            : { ok: true, available: false, apps: out, error: 'Runs on Outlaw Server.' };
+    },
+
+    'apps:install': async (_ctx, { id } = {}) => {
+        const app = SERVER_APPS[String(id || '')];
+        if (!app) return { ok: false, error: 'Unknown application.' };
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
+        return app.install();
+    },
+
+    'apps:remove': async (_ctx, { id } = {}) => {
+        const app = SERVER_APPS[String(id || '')];
+        if (!app) return { ok: false, error: 'Unknown application.' };
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
+        return app.remove();
+    },
+
+    // Start/stop without uninstalling — the "disable to save resources" path.
+    'apps:set-running': async (_ctx, { id, running } = {}) => {
+        const app = SERVER_APPS[String(id || '')];
+        if (!app) return { ok: false, error: 'Unknown application.' };
+        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
+        return app.setRunning(running !== false);
+    },
+
     // --- remote access ------------------------------------------------------
     // Reaching this machine from somewhere else. The rules about WHERE the
     // panel is allowed to listen live in remote.js; these operations only ever
@@ -551,8 +739,8 @@ const ops = {
             bindKind: remote.classifyBind(cfg.host).kind,
             serve: cfg.trustProxy === true,
             // Honest statement of what this build can do yet.
-            phase: 4,
-            note: 'Phase 4: sign-in, remote access over an encrypted tunnel, and the server toolset (services, journal, firewall, SSH keys, storage). One-click game servers land in phase 5.',
+            phase: 5,
+            note: 'Phase 5 (partial): the full server toolset, plus one-click Docker, Portainer and Cockpit. Pterodactyl is next.',
         };
     },
 };

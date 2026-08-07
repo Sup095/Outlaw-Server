@@ -54,7 +54,7 @@ guarded terminal.
 | ✅ | **2 · Sign-in that means it** | Password (scrypt) + TOTP 2FA, revocable server-side sessions, per-IP lockout, audit log. |
 | ✅ | **3 · Remote access** | Tailscale/WireGuard — manage every box from anywhere, with nothing on the public internet. |
 | ✅ | **4 · Server toolset** | Services, journal viewer, firewall, SSH keys and storage — all reachable from either frontend. |
-| 🔭 | **5 · Game servers** | One-click Pterodactyl (+ Docker), optional Portainer & Cockpit — all removable. |
+| 🚧 | **5 · Game servers** | Docker, Portainer and Cockpit install in one click and are fully removable. Pterodactyl is next. |
 | 🔭 | **6 · Polish & first install** | Accessibility pass, docs, and the first real-hardware test. |
 
 ### Signing in
@@ -100,6 +100,23 @@ install time, and `outlaw remote off` puts the machine back to nothing running a
 nothing listening. It is worth being straight about this one: a tunnel daemon is a
 real process with real (small) memory use and periodic keepalive traffic — that is
 the honest price of being reachable, and it is why it is opt-in rather than on.
+
+### Server software
+
+Nothing is installed until you ask. A fresh machine ships with none of it, so an
+idle server runs nothing it wasn't told to.
+
+- **Docker** — containers. Pterodactyl and Portainer both sit on top of it.
+- **Portainer** — point-and-click Docker management. Published to **loopback only**:
+  it can control every container on the box, so it does not go on a network
+  interface — reach it over your tunnel, like the panel.
+- **Cockpit** — the classic Linux admin console. Installed **socket-activated**, so
+  it uses nothing at all until a browser actually connects.
+
+Each can be **stopped without uninstalling** (frees the memory, keeps the setup) or
+removed outright. **Removing never deletes your data** — container volumes and
+`/var/lib/docker` are left exactly as they are, so anything you were running can be
+brought straight back.
 
 ### Your server, your overhead
 

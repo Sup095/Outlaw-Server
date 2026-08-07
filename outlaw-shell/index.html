@@ -324,13 +324,26 @@ sudo outlaw remote bind tunnel</pre>
             <div class="row">
                 <h2>Apps</h2>
                 <span class="spacer"></span>
+                <button data-action="server-apps-refresh" title="Re-check what's installed">↻</button>
                 <button id="apps-refresh-db" title="Sync the local package database (pacman -Sy). Useful if Install fails with 'target not found'.">↻ Refresh package list</button>
             </div>
+
+            <div class="card">
+                <h3>Server software</h3>
+                <details class="page-help">
+                    <summary>What is this?</summary>
+                    <p>The things a server actually runs, installed only when you ask. Nothing here is on by default — a fresh install ships with none of it, so you never pay for what you don't use.</p>
+                    <p>Each one can be <b>stopped</b> without uninstalling (frees the memory, keeps the setup) or <b>removed</b> entirely. Removing never deletes your data: container volumes and <span class="mono">/var/lib/docker</span> are left alone.</p>
+                </details>
+                <div id="server-apps"><div class="muted">Loading…</div></div>
+                <div id="server-apps-msg" class="muted mono" style="margin-top:8px;word-break:break-word;"></div>
+            </div>
+
             <div class="card">
                 <div class="muted">
-                    The default install is minimal. Install extra tools here — they download from the
-                    official Arch repos and you'll see a system password prompt the first time each session.
-                    Use <span class="mono">↻ Refresh package list</span> if an install can't find a package.
+                    Anything else from the official Arch repos can be installed below —
+                    handy for tools a particular server needs. Use <span class="mono">↻ Refresh package list</span>
+                    if an install can't find a package.
                 </div>
             </div>
             <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap;align-items:center;">
