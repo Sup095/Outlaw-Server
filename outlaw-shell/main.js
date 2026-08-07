@@ -138,21 +138,14 @@ const DEFAULT_SETTINGS = {
     autoCheck: true,         // background check for shell updates
     lastUpdateCheck: 0,
     lastNotifiedVersion: '', // don't re-toast the same available version
-    kbLayout: '',            // keyboard layout code (setxkbmap), '' = system default (us). Applied on boot.
-    // Tier-2 desktop QOL (V2.0.171)
-    nightLight: false,       // warm color-temperature filter (gammastep). Re-applied on boot when on.
-    nightLightTemp: 4000,    // Kelvin when night light is ON (lower = warmer). Clamped 2000–6500.
-    dnd: false,              // Do Not Disturb — pause desktop notifications (dunst). Re-applied on boot.
-    autoLockMin: 0,          // auto-lock the desktop after N minutes idle. 0 = never.
-    autoSleepMin: 0,         // suspend the machine after N minutes idle. 0 = never.
+    autoLockMin: 0,          // auto-lock the panel after N minutes idle. 0 = never.
     screenBlankMin: -1,      // blank the screen (X screensaver/DPMS) after N min. -1 = system default, 0 = never.
     recentApps: [],          // MRU list of launched app ids for the Dashboard "Recent" row (max 8).
-    // Display settings. Only modes the user explicitly KEPT through the 15s
-    // auto-revert confirm are stored here ({outputName: {mode, rate}}) and
-    // re-applied at boot — and even then only after re-validating against the
-    // modes xrandr lists RIGHT NOW, so a changed monitor can't get a bad mode.
-    displayModes: {},
-    brightnessPct: -1,       // backlight %, floored at 5 so it can't go black. -1 = untouched.
+    // Phase 6 — kbLayout / nightLight / dnd / autoSleepMin / displayModes /
+    // brightnessPct are gone with the code that read them. Leaving defaults for
+    // settings nothing can set or apply is how the next reader concludes the
+    // feature exists. autoSleepMin in particular is worth being rid of: it
+    // suspended the machine on idle, which on a server means it stops serving.
     // Phase 6 — first-boot Quickstart tour. Shown once on the first desktop
     // entry; set true on Skip/Finish ("don't show again"). Replayable from Help.
     quickstartSeen: false,
@@ -1337,65 +1330,16 @@ function runStreamingJob(cmd, args, phaseLabels, phaseMatchers) {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard layouts — a curated allowlist (code -> label). The renderer can only
-// pick a code from THIS list; it can never pass an arbitrary string to setxkbmap,
-// so there's no injection surface. Codes are standard XKB layout names.
+// Removed with the desktop OS, and cleaned up here in Phase 6:
+//   * the keyboard-layout picker (a 24-entry XKB allowlist + apply-on-boot),
+//   * night light (gammastep) and Do Not Disturb (dunstctl).
+// In every case the IPC handlers had already gone in the fork, leaving helpers
+// and boot-time apply calls reading settings that nothing could write any more.
+//
+// NOTE — keyboard layout is a real gap, not just dead code: typing the admin
+// password at the physical console assumes a US layout until a server-side
+// picker exists.
 // ---------------------------------------------------------------------------
-const KB_LAYOUTS = [
-    { code: 'us', label: 'English (US)' },
-    { code: 'gb', label: 'English (UK)' },
-    { code: 'de', label: 'German' },
-    { code: 'fr', label: 'French' },
-    { code: 'es', label: 'Spanish' },
-    { code: 'it', label: 'Italian' },
-    { code: 'pt', label: 'Portuguese' },
-    { code: 'br', label: 'Portuguese (Brazil)' },
-    { code: 'latam', label: 'Spanish (Latin America)' },
-    { code: 'dk', label: 'Danish' },
-    { code: 'no', label: 'Norwegian' },
-    { code: 'se', label: 'Swedish' },
-    { code: 'fi', label: 'Finnish' },
-    { code: 'pl', label: 'Polish' },
-    { code: 'cz', label: 'Czech' },
-    { code: 'hu', label: 'Hungarian' },
-    { code: 'ru', label: 'Russian' },
-    { code: 'ua', label: 'Ukrainian' },
-    { code: 'tr', label: 'Turkish' },
-    { code: 'gr', label: 'Greek' },
-    { code: 'nl', label: 'Dutch' },
-    { code: 'be', label: 'Belgian' },
-    { code: 'ch', label: 'Swiss' },
-    { code: 'ca', label: 'Canadian' },
-];
-function _isKbLayout(code) { return KB_LAYOUTS.some((l) => l.code === code); }
-// Apply a keyboard layout for the whole X session (setxkbmap is session-global).
-// Silently no-ops off-Linux / if the code isn't in the allowlist.
-function applyKbLayout(code) {
-    if (!IS_LINUX || !code || !_isKbLayout(code)) return;
-    try { execFile('setxkbmap', [code], () => {}); } catch { /* setxkbmap absent */ }
-}
-
-// ----- Tier-2 desktop QOL: night light + Do Not Disturb -----------------
-// Night light warms the screen via gammastep's one-shot manual mode: `-O TEMP`
-// sets the X gamma ramp and exits (no lingering daemon), `-x` resets to neutral.
-// This is an unprivileged, per-session gamma-ramp op — the worst case is a wrong
-// tint that `-x` (or the next login) clears, so it can NEVER strand the boot.
-function applyNightLight(on, temp) {
-    if (!IS_LINUX) return;
-    const t = Math.max(2000, Math.min(6500, Number(temp) || 4000));
-    try {
-        if (on) execFile('gammastep', ['-P', '-O', String(t)], () => {});
-        else execFile('gammastep', ['-x'], () => {});
-    } catch { /* gammastep absent — night light is a no-op until installed */ }
-}
-
-// Do Not Disturb toggles dunst's paused state. dunstctl ships with dunst (the
-// notification daemon we bundle). Best-effort — if dunst isn't up yet the call
-// no-ops and the saved state re-applies next time it's toggled.
-function applyDnd(on) {
-    if (!IS_LINUX) return;
-    try { execFile('dunstctl', ['set-paused', on ? 'true' : 'false'], () => {}); } catch { /* dunst absent */ }
-}
 
 // ----- Power management: screen blank + system-wide idle watch ------------
 // Screen blanking uses the X screensaver + DPMS timers (xset). -1 = leave the
@@ -1431,87 +1375,12 @@ function restoreScreenBlankDefaults() {
     } catch { /* xset absent — no-op */ }
 }
 
-// ----- Display settings (xrandr) + brightness (backlight sysfs) -----------
-// THE safety design for the one feature that can black-screen a machine:
-//   * only modes the display ITSELF advertises (parsed from xrandr) can be
-//     applied — arbitrary modelines never exist here;
-//   * every apply arms a MAIN-PROCESS 15s revert timer. If the user doesn't
-//     confirm (because the screen went black / unusable), main restores the
-//     previous mode on its own — a wedged or invisible renderer can't stop it;
-//   * boot re-apply only uses modes the user explicitly KEPT, re-validated
-//     against what xrandr lists at that moment (monitor swapped = skip).
-function _parseXrandr(out) {
-    const outputs = [];
-    let cur = null;
-    for (const line of String(out || '').split('\n')) {
-        const head = line.match(/^(\S+) (connected|disconnected)\b(.*)$/);
-        if (head) {
-            if (head[2] === 'connected') {
-                cur = { name: head[1], primary: /\bprimary\b/.test(head[3]), current: null, modes: [] };
-                outputs.push(cur);
-            } else cur = null;
-            continue;
-        }
-        if (!cur) continue;
-        const m = line.match(/^\s+(\d+x\d+i?)\s+(.+)$/);
-        if (!m) continue;
-        const rates = [];
-        for (const tok of m[2].trim().split(/\s+/)) {
-            const r = tok.match(/^(\d+(?:\.\d+)?)([*+]*)$/);
-            if (!r) continue;
-            rates.push(r[1]);
-            if (r[2].includes('*')) cur.current = { mode: m[1], rate: r[1] };
-        }
-        if (rates.length) cur.modes.push({ mode: m[1], rates });
-    }
-    return outputs;
-}
-async function _displayInfo() {
-    const r = await runShell('xrandr --query 2>/dev/null', { timeout: 5000 });
-    return _parseXrandr(r.stdout);
-}
-function _xrandrApply(output, mode, rate) {
-    return new Promise((resolve) => {
-        const args = ['--output', output, '--mode', mode];
-        if (rate) args.push('--rate', rate);
-        execFile('xrandr', args, { timeout: 10000 },
-            (err, so, se) => resolve({ ok: !err, error: (se || so || (err && err.message) || '').trim().slice(0, 200) }));
-    });
-}
-let _dispRevert = null;   // { timer, output, prevMode, prevRate } while a confirm window is open
-function _dispDoRevert() {
-    const s = _dispRevert;
-    if (!s) return;
-    _dispRevert = null;
-    clearTimeout(s.timer);
-    if (s.prevMode) _xrandrApply(s.output, s.prevMode, s.prevRate);
-    else execFile('xrandr', ['--output', s.output, '--auto'], { timeout: 10000 }, () => {});
-}
-function _backlightDir() {
-    try {
-        const base = '/sys/class/backlight';
-        const first = fs.readdirSync(base).filter(Boolean)[0];
-        return first ? `${base}/${first}` : null;
-    } catch { return null; }
-}
-function applyBrightnessPct(pct) {
-    if (!IS_LINUX) return { ok: false, error: 'Brightness runs on Outlaw Server.' };
-    const dir = _backlightDir();
-    if (!dir) return { ok: false, error: 'No controllable backlight on this machine.' };
-    // Floor 5% — the slider can dim, never black the screen entirely.
-    const p = Math.max(5, Math.min(100, Math.round(Number(pct) || 0)));
-    try {
-        const max = parseInt(fs.readFileSync(`${dir}/max_brightness`, 'utf8').trim(), 10);
-        if (!isFinite(max) || max <= 0) return { ok: false, error: 'Backlight reports no range.' };
-        fs.writeFileSync(`${dir}/brightness`, String(Math.max(1, Math.round(max * p / 100))));
-        return { ok: true, pct: p };
-    } catch (e) {
-        const perm = e && (e.code === 'EACCES' || e.code === 'EPERM');
-        return { ok: false, error: perm
-            ? 'No permission to change the backlight — the udev rule is missing (fresh-install a current ISO).'
-            : 'Couldn\'t set brightness: ' + ((e && e.message) || e) };
-    }
-}
+// Display modes and backlight brightness were removed with the desktop OS.
+// Their IPC handlers went in the fork; what stayed was ~90 lines of xrandr
+// parsing, a mode-apply with a 15s revert timer, backlight sysfs writes and a
+// boot-time restore — all keyed off settings nothing could write. This is also
+// the one feature capable of black-screening a machine, so dead code for it is
+// exactly the kind worth deleting rather than leaving to be re-wired by accident.
 
 // System-wide idle watch for auto-lock and auto-sleep. Uses Electron's
 // powerMonitor.getSystemIdleTime() — X-server-wide idle, so activity in ANY
@@ -1526,39 +1395,24 @@ function applyBrightnessPct(pct) {
 //     re-checks hasPin/live/already-locked before acting).
 let idleWatchTimer = null;
 let _idleLockFired = false;
-let _idleSleepFired = false;
+// Auto-LOCK only. The inherited desktop version also auto-SUSPENDED the machine
+// after `autoSleepMin` idle minutes — on a server that is a failure mode, not a
+// feature: the box stops serving because nobody touched its keyboard overnight.
+// The setting is unreachable from the UI now, but settings.json is a file on
+// disk, so a value migrated from a desktop config (or typed by hand) would
+// still have suspended a live server. Deleting the code deletes the risk.
 function syncIdleWatch() {
     const lockMin = Math.max(0, Number(settings.autoLockMin) || 0);
-    const sleepMin = Math.max(0, Number(settings.autoSleepMin) || 0);
     if (idleWatchTimer) { clearInterval(idleWatchTimer); idleWatchTimer = null; }
-    _idleLockFired = false; _idleSleepFired = false;
-    if (!lockMin && !sleepMin) return;
+    _idleLockFired = false;
+    if (!lockMin) return;                    // no timer at all unless asked for
     idleWatchTimer = setInterval(() => {
         let idle = 0;
         try { idle = powerMonitor.getSystemIdleTime(); } catch { return; }
-        if (idle < 30) { _idleLockFired = false; _idleSleepFired = false; return; }
-        if (lockMin && !_idleLockFired && idle >= lockMin * 60) {
+        if (idle < 30) { _idleLockFired = false; return; }
+        if (!_idleLockFired && idle >= lockMin * 60) {
             _idleLockFired = true;
             if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('idle-lock');
-        }
-        if (sleepMin && !_idleSleepFired && idle >= sleepMin * 60) {
-            // Never suspend under a live tracked job — an install / update /
-            // model download would lose its network connections overnight.
-            // Not marked fired, so it re-checks each tick until the job ends.
-            if (trackedProcs.size > 0) return;
-            _idleSleepFired = true;
-            // Standard OS behavior: wake up to a lock screen. Fire the lock
-            // now (if the user has auto-lock on) so the desktop is covered
-            // before + after the suspend, regardless of which timeout is longer.
-            if (lockMin && !_idleLockFired && mainWindow && !mainWindow.isDestroyed()) {
-                _idleLockFired = true;
-                mainWindow.webContents.send('idle-lock');
-            }
-            if (IS_LINUX) {
-                runShell('systemctl suspend', { timeout: 10000 }).then((r) => {
-                    if (r.code !== 0) errorlog.append('warn', 'power', 'auto-sleep suspend failed: ' + (r.stderr || r.stdout || 'unknown').slice(-160));
-                }).catch(() => {});
-            }
         }
     }, 30000);
 }
@@ -1611,25 +1465,6 @@ function registerIpc() {
 
     ipcMain.handle('system:info', () => systemInfo());
 
-    // ----- Keyboard layout -------------------------------------------------
-    ipcMain.handle('kb:list', () => KB_LAYOUTS);
-    ipcMain.handle('kb:status', async () => {
-        const saved = settings.kbLayout || '';
-        if (!IS_LINUX) return { current: saved || 'us', saved };
-        const r = await runShell('setxkbmap -query 2>/dev/null | awk \'/^layout:/{print $2}\'', { timeout: 3000 });
-        const current = (r.stdout || '').split(',')[0].trim() || 'us';
-        return { current, saved };
-    });
-    ipcMain.handle('kb:set', async (_e, code) => {
-        if (!_isKbLayout(code)) return { ok: false, error: 'Unknown keyboard layout.' };
-        if (IS_LINUX) {
-            const r = await runShell(`setxkbmap ${code}`, { timeout: 4000 });
-            if (r.code !== 0) return { ok: false, error: (r.stderr || 'setxkbmap failed').slice(-200) };
-        }
-        settings = saveSettings({ ...settings, kbLayout: code });
-        return { ok: true, code };
-    });
-
     // ----- Date / time / timezone -----------------------------------------
     // Reads are unprivileged; setting the zone / NTP goes through pkexec
     // (polkit prompts once). The timezone is validated against the real zone
@@ -1660,183 +1495,6 @@ function registerIpc() {
         const r = await runShell(`pkexec timedatectl set-ntp ${on ? 'true' : 'false'}`, { timeout: 15000 });
         if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout || 'Could not change auto-time.').slice(-200) };
         return { ok: true, ntp: !!on };
-    });
-
-    // ----- Bluetooth -------------------------------------------------------
-    // Pairing/managing devices is handled by blueman (the standard GTK Bluetooth
-    // manager) which we bundle — reimplementing the full BT stack in the shell
-    // would be fragile. Here we report status, power the adapter on/off, and open
-    // the manager. Power uses rfkill (no root needed for the user's own session).
-    ipcMain.handle('bt:status', async () => {
-        if (!IS_LINUX) return { present: false, powered: false };
-        const r = await runShell('rfkill list bluetooth 2>/dev/null', { timeout: 3000 });
-        const out = r.stdout || '';
-        const present = /bluetooth/i.test(out);
-        const powered = present && !/Soft blocked:\s*yes/i.test(out);
-        return { present, powered };
-    });
-    ipcMain.handle('bt:power', async (_e, on) => {
-        if (!IS_LINUX) return { ok: true, powered: !!on };
-        await runShell(`rfkill ${on ? 'unblock' : 'block'} bluetooth 2>/dev/null`, { timeout: 5000 });
-        if (on) await runShell('bluetoothctl power on 2>/dev/null || true', { timeout: 4000 });
-        return { ok: true, powered: !!on };
-    });
-    ipcMain.handle('bt:manage', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Bluetooth manager runs on Outlaw Server.' };
-        // Confirm the manager is actually installed before claiming success, then
-        // make sure the adapter is unblocked and open the pairing GUI (blueman).
-        const have = await runShell('command -v blueman-manager >/dev/null 2>&1 && echo yes', { timeout: 3000 });
-        if (!/yes/.test(have.stdout || '')) return { ok: false, error: 'The Bluetooth manager (blueman) isn\'t installed yet.' };
-        await runShell('rfkill unblock bluetooth 2>/dev/null || true', { timeout: 4000 });
-        try { const c = spawn('blueman-manager', [], { detached: true, stdio: 'ignore' }); c.on('error', () => {}); c.unref(); }
-        catch { return { ok: false, error: 'Could not open the Bluetooth manager.' }; }
-        return { ok: true };
-    });
-
-    // ----- Display settings + brightness -----------------------------------
-    ipcMain.handle('display:info', async () => {
-        if (!IS_LINUX) return { supported: false, outputs: [] };
-        const outputs = await _displayInfo();
-        return { supported: true, outputs, pending: !!_dispRevert };
-    });
-    ipcMain.handle('display:set-mode', async (_e, payload) => {
-        if (!IS_LINUX) return { ok: false, error: 'Display settings run on Outlaw Server.' };
-        if (_dispRevert) return { ok: false, error: 'Confirm or revert the pending change first.' };
-        const output = String((payload && payload.output) || '');
-        const mode = String((payload && payload.mode) || '');
-        const rate = String((payload && payload.rate) || '');
-        // Validate EVERYTHING against what xrandr itself lists right now.
-        const outputs = await _displayInfo();
-        const o = outputs.find((x) => x.name === output);
-        if (!o) return { ok: false, error: 'Unknown display output.' };
-        const mm = o.modes.find((x) => x.mode === mode);
-        if (!mm) return { ok: false, error: 'That display doesn\'t list that mode.' };
-        if (rate && !mm.rates.includes(rate)) return { ok: false, error: 'That mode doesn\'t list that refresh rate.' };
-        const prev = o.current || null;
-        const r = await _xrandrApply(output, mode, rate);
-        if (!r.ok) return { ok: false, error: r.error || 'xrandr rejected the mode.' };
-        // Arm the MAIN-SIDE auto-revert — fires even if the renderer never
-        // comes back. 15s + a little slack over the renderer's countdown.
-        _dispRevert = {
-            output,
-            prevMode: prev && prev.mode,
-            prevRate: prev && prev.rate,
-            timer: setTimeout(_dispDoRevert, 15500),
-        };
-        return { ok: true, revertSeconds: 15 };
-    });
-    ipcMain.handle('display:confirm-mode', async (_e, payload) => {
-        const s = _dispRevert;
-        if (!s) return { ok: false, error: 'Nothing to confirm.' };
-        clearTimeout(s.timer);
-        _dispRevert = null;
-        // Persist ONLY user-kept modes; boot re-applies them after re-validation.
-        const output = String((payload && payload.output) || s.output);
-        const mode = String((payload && payload.mode) || '');
-        const rate = String((payload && payload.rate) || '');
-        if (mode) {
-            const dm = { ...(settings.displayModes || {}) };
-            dm[output] = { mode, rate };
-            settings = saveSettings({ ...settings, displayModes: dm });
-        }
-        return { ok: true };
-    });
-    ipcMain.handle('display:revert-mode', async () => {
-        if (!_dispRevert) return { ok: false, error: 'Nothing to revert.' };
-        _dispDoRevert();
-        return { ok: true };
-    });
-    ipcMain.handle('display:reset-auto', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Display settings run on Outlaw Server.' };
-        if (_dispRevert) _dispDoRevert();
-        // Back to every output's preferred mode — the always-safe baseline —
-        // and stop re-applying saved modes at boot.
-        const r = await runShell('xrandr --auto 2>&1', { timeout: 10000 });
-        settings = saveSettings({ ...settings, displayModes: {} });
-        return { ok: r.code === 0, error: r.code === 0 ? '' : (r.stdout || '').slice(0, 200) };
-    });
-    ipcMain.handle('display:brightness-info', () => {
-        if (!IS_LINUX) return { present: false };
-        const dir = _backlightDir();
-        if (!dir) return { present: false };
-        try {
-            const max = parseInt(fs.readFileSync(`${dir}/max_brightness`, 'utf8').trim(), 10);
-            const cur = parseInt(fs.readFileSync(`${dir}/brightness`, 'utf8').trim(), 10);
-            if (!isFinite(max) || max <= 0) return { present: false };
-            let writable = true;
-            try { fs.accessSync(`${dir}/brightness`, fs.constants.W_OK); } catch { writable = false; }
-            return { present: true, pct: Math.max(1, Math.round(cur / max * 100)), writable };
-        } catch { return { present: false }; }
-    });
-    ipcMain.handle('display:set-brightness', async (_e, pct) => {
-        const r = applyBrightnessPct(pct);
-        if (r.ok) settings = saveSettings({ ...settings, brightnessPct: r.pct });
-        return r;
-    });
-
-    // ----- Night light (warm color-temperature filter) --------------------
-    ipcMain.handle('nightlight:status', () => ({
-        on: !!settings.nightLight,
-        temp: Math.max(2000, Math.min(6500, Number(settings.nightLightTemp) || 4000)),
-        supported: IS_LINUX,
-    }));
-    ipcMain.handle('nightlight:set', async (_e, payload) => {
-        const on = !!(payload && payload.on);
-        const temp = Math.max(2000, Math.min(6500,
-            Number(payload && payload.temp) || Number(settings.nightLightTemp) || 4000));
-        if (IS_LINUX && on) {
-            const have = await runShell('command -v gammastep >/dev/null 2>&1 && echo yes', { timeout: 3000 });
-            if (!/yes/.test(have.stdout || '')) return { ok: false, error: 'Night light needs the gammastep package, which isn\'t installed yet.' };
-        }
-        applyNightLight(on, temp);
-        settings = saveSettings({ ...settings, nightLight: on, nightLightTemp: temp });
-        return { ok: true, on, temp };
-    });
-
-    // ----- Notifications: Do Not Disturb ----------------------------------
-    ipcMain.handle('notif:dnd-status', async () => {
-        if (!IS_LINUX) return { paused: !!settings.dnd, supported: false };
-        const r = await runShell('dunstctl is-paused 2>/dev/null', { timeout: 3000 });
-        const out = (r.stdout || '').trim();
-        return { paused: /true/i.test(out), supported: /^(true|false)$/i.test(out) };
-    });
-    ipcMain.handle('notif:dnd-set', async (_e, on) => {
-        if (IS_LINUX) {
-            const have = await runShell('command -v dunstctl >/dev/null 2>&1 && echo yes', { timeout: 3000 });
-            if (!/yes/.test(have.stdout || '')) return { ok: false, error: 'The notification daemon (dunst) isn\'t running.' };
-            await runShell(`dunstctl set-paused ${on ? 'true' : 'false'} 2>/dev/null`, { timeout: 3000 });
-        }
-        settings = saveSettings({ ...settings, dnd: !!on });
-        return { ok: true, paused: !!on };
-    });
-    ipcMain.handle('notif:show-last', async () => {
-        if (!IS_LINUX) return { ok: false };
-        // Re-display the most recently dismissed notification (unpause first so it
-        // actually appears even while DND is on).
-        await runShell('dunstctl set-paused false 2>/dev/null && dunstctl history-pop 2>/dev/null', { timeout: 3000 });
-        // Restore the user's DND choice after popping.
-        if (settings.dnd) await runShell('dunstctl set-paused true 2>/dev/null', { timeout: 2000 });
-        return { ok: true };
-    });
-    ipcMain.handle('notif:history', async () => {
-        if (!IS_LINUX) return { supported: false, items: [] };
-        // dunstctl history returns {"data": [[ {appname:{data}, summary:{data}, ...} ]]}.
-        // Read-only; body text is renderer-escaped before display.
-        const r = await runShell('dunstctl history 2>/dev/null', { timeout: 3000 });
-        try {
-            const j = JSON.parse(r.stdout || '');
-            const arr = (j && Array.isArray(j.data) && Array.isArray(j.data[0])) ? j.data[0] : [];
-            // Cap every field (a hostile local notify-send can carry multi-MB
-            // strings) and skip malformed entries instead of failing the lot.
-            const items = arr.slice(0, 20)
-                .filter((n) => n && typeof n === 'object')
-                .map((n) => ({
-                    app: String((n.appname && n.appname.data) || '').slice(0, 80),
-                    summary: String((n.summary && n.summary.data) || '').slice(0, 200),
-                    body: String((n.body && n.body.data) || '').slice(0, 300),
-                })).filter((n) => n.summary || n.body);
-            return { supported: true, items };
-        } catch { return { supported: false, items: [] }; }
     });
 
     // Phase 8: real boot messages for the cinematic boot screen. journalctl
@@ -1967,29 +1625,6 @@ function registerIpc() {
         };
     });
 
-    // Round-2 QOL — battery status for the topbar (laptops). Read-only from sysfs;
-    // returns { present:false } on desktops / non-Linux so the indicator hides.
-    ipcMain.handle('system:battery', async () => {
-        if (!IS_LINUX) return { present: false };
-        try {
-            const base = '/sys/class/power_supply';
-            let dirs = [];
-            try { dirs = fs.readdirSync(base); } catch { return { present: false }; }
-            const bat = dirs.find((d) => /^BAT/i.test(d));
-            if (!bat) return { present: false };
-            const read = (f) => { try { return fs.readFileSync(path.join(base, bat, f), 'utf8').trim(); } catch { return ''; } };
-            const cap = parseInt(read('capacity'), 10);
-            if (!Number.isFinite(cap)) return { present: false };
-            const status = read('status') || 'Unknown';   // Charging|Discharging|Full|Not charging|Unknown
-            return {
-                present: true,
-                percent: Math.max(0, Math.min(100, cap)),
-                status,
-                charging: status === 'Charging' || status === 'Full',
-            };
-        } catch { return { present: false }; }
-    });
-
     // Round-2 QOL — volume control. Detect the audio backend once (PipeWire →
     // PulseAudio → ALSA) and drive it. Every set takes a CLAMPED integer %, so
     // there is no shell-injection surface.
@@ -2003,107 +1638,6 @@ function registerIpc() {
         _audioBackend = 'none';
         return _audioBackend;
     }
-    ipcMain.handle('audio:get', async () => {
-        if (!IS_LINUX) return { available: false };
-        try {
-            const be = await detectAudioBackend();
-            if (be === 'wpctl') {
-                const r = await runShell('wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null', { timeout: 4000 });
-                const m = (r.stdout || '').match(/Volume:\s*([\d.]+)/);
-                return { available: !!m, volume: m ? Math.round(parseFloat(m[1]) * 100) : 0, muted: /MUTED/i.test(r.stdout || '') };
-            }
-            if (be === 'pactl') {
-                const v = await runShell('pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null', { timeout: 4000 });
-                const m = (v.stdout || '').match(/(\d+)%/);
-                const mut = await runShell('pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null', { timeout: 4000 });
-                return { available: !!m, volume: m ? Number(m[1]) : 0, muted: /yes/i.test(mut.stdout || '') };
-            }
-            if (be === 'amixer') {
-                const r = await runShell('amixer get Master 2>/dev/null', { timeout: 4000 });
-                const m = (r.stdout || '').match(/\[(\d+)%\]/);
-                return { available: !!m, volume: m ? Number(m[1]) : 0, muted: /\[off\]/i.test(r.stdout || '') };
-            }
-        } catch {}
-        return { available: false };
-    });
-    ipcMain.handle('audio:set', async (_e, pct) => {
-        if (!IS_LINUX) return { ok: false };
-        const v = Math.max(0, Math.min(100, parseInt(pct, 10) || 0));
-        const be = await detectAudioBackend();
-        let cmd = null;
-        if (be === 'wpctl') cmd = `wpctl set-volume @DEFAULT_AUDIO_SINK@ ${v}%`;
-        else if (be === 'pactl') cmd = `pactl set-sink-volume @DEFAULT_SINK@ ${v}%`;
-        else if (be === 'amixer') cmd = `amixer set Master ${v}% unmute 2>/dev/null`;
-        if (!cmd) return { ok: false };
-        const r = await runShell(cmd, { timeout: 4000 });
-        return { ok: r.code === 0 || r.code === undefined };
-    });
-    ipcMain.handle('audio:toggle-mute', async () => {
-        if (!IS_LINUX) return { ok: false };
-        const be = await detectAudioBackend();
-        let cmd = null;
-        if (be === 'wpctl') cmd = 'wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle';
-        else if (be === 'pactl') cmd = 'pactl set-sink-mute @DEFAULT_SINK@ toggle';
-        else if (be === 'amixer') cmd = 'amixer set Master toggle 2>/dev/null';
-        if (!cmd) return { ok: false };
-        const r = await runShell(cmd, { timeout: 4000 });
-        return { ok: r.code === 0 || r.code === undefined };
-    });
-
-    // QOL — sound OUTPUT device picker. pactl ships with libpulse (a
-    // pipewire-pulse dependency), and its JSON output keeps parsing robust.
-    // Gracefully returns an empty list when pactl is absent (ALSA-only setups),
-    // which hides the picker in the UI.
-    ipcMain.handle('audio:sinks', async () => {
-        if (!IS_LINUX) return { ok: false, sinks: [] };
-        const r = await runShell('pactl -f json list sinks 2>/dev/null', { timeout: 4000 });
-        const def = await runShell('pactl get-default-sink 2>/dev/null', { timeout: 3000 });
-        try {
-            const arr = JSON.parse(r.stdout || '[]');
-            if (!Array.isArray(arr)) return { ok: false, sinks: [] };
-            const cur = (def.stdout || '').trim();
-            const sinks = arr.map((s) => ({
-                name: String((s && s.name) || ''),
-                label: String((s && (s.description || s.name)) || '').slice(0, 80),
-                current: !!(s && s.name === cur),
-            })).filter((s) => s.name);
-            return { ok: true, sinks };
-        } catch { return { ok: false, sinks: [] }; }
-    });
-    ipcMain.handle('audio:set-sink', async (_e, name) => {
-        if (!IS_LINUX) return { ok: false };
-        const n = String(name || '');
-        if (!n || n.length > 200) return { ok: false, error: 'Bad device name.' };
-        // Validate against the real sink list, then set via execFile argv (no shell).
-        const r = await runShell('pactl -f json list sinks 2>/dev/null', { timeout: 4000 });
-        let names = [];
-        try { names = JSON.parse(r.stdout || '[]').map((s) => String((s && s.name) || '')); } catch {}
-        if (!names.includes(n)) return { ok: false, error: 'Unknown output device.' };
-        const set = await new Promise((resolve) => {
-            execFile('pactl', ['set-default-sink', n], { timeout: 5000 },
-                (err, so, se) => resolve({ err, out: (se || so || '').trim() }));
-        });
-        if (set.err) return { ok: false, error: set.out.slice(0, 200) || 'Could not switch the output device.' };
-        return { ok: true };
-    });
-
-    // Round-2 QOL — screenshots via scrot (already bundled for CodeMaker OCR).
-    // mode 'region' = interactive drag-select; otherwise full screen with a 1s
-    // delay so any open menu/popover can close. Saves to ~/Pictures.
-    ipcMain.handle('screenshot:capture', async (_e, mode) => {
-        if (!IS_LINUX) return { ok: false, error: 'Screenshots run on Outlaw Server.' };
-        const has = await runShell('command -v scrot >/dev/null 2>&1 && echo yes');
-        if (!/yes/.test(has.stdout || '')) return { ok: false, error: 'Screenshot tool (scrot) not available.' };
-        const dir = path.join(os.homedir(), 'Pictures');
-        try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-        const region = mode === 'region';
-        const opts = region ? '-s' : '-d 1';
-        const cmd = `cd ${JSON.stringify(dir)} && scrot ${opts} 'Screenshot-%Y-%m-%d_%H-%M-%S.png' -e 'echo $f'`;
-        const r = await runShell(cmd, { timeout: region ? 60000 : 10000 });
-        const fname = ((r.stdout || '').trim().split('\n').filter(Boolean).pop() || '').replace(/^.*\//, '');
-        if ((r.code === 0 || r.code === undefined) && fname) return { ok: true, path: path.join(dir, fname) };
-        return { ok: false, error: region ? 'Screenshot cancelled.' : (r.stderr || 'Capture failed.').slice(-160) };
-    });
 
     // QOL — screen RECORDING (ffmpeg x11grab → ~/Videos, video-only, H.264).
     // One recording at a time. The child is added to trackedProcs, which gives
@@ -2113,53 +1647,6 @@ function registerIpc() {
     // a friendly "install it from Apps" error when absent.
     let recProc = null;
     let recPath = '';
-    ipcMain.handle('record:status', async () => {
-        if (!IS_LINUX) return { supported: false, recording: false, haveFfmpeg: false };
-        const have = await runShell('command -v ffmpeg >/dev/null 2>&1 && echo yes', { timeout: 3000 });
-        return { supported: true, haveFfmpeg: /yes/.test(have.stdout || ''), recording: !!recProc, path: recPath };
-    });
-    ipcMain.handle('record:start', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Screen recording runs on Outlaw Server.' };
-        if (recProc) return { ok: false, error: 'Already recording — stop the current recording first.' };
-        const have = await runShell('command -v ffmpeg >/dev/null 2>&1 && echo yes', { timeout: 3000 });
-        if (!/yes/.test(have.stdout || '')) {
-            return { ok: false, error: 'Screen recording needs the ffmpeg package — install it from Apps (search "ffmpeg").' };
-        }
-        // x11grab defaults to 640x480 without an explicit size — read the real one.
-        const dim = await runShell("xdpyinfo 2>/dev/null | awk '/dimensions:/{print $2; exit}'", { timeout: 3000 });
-        const size = /^\d+x\d+$/.test((dim.stdout || '').trim()) ? (dim.stdout || '').trim() : '1920x1080';
-        const dir = path.join(os.homedir(), 'Videos');
-        try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-        const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-        const file = path.join(dir, `outlaw-rec-${stamp}.mp4`);
-        let child;
-        try {
-            child = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error',
-                '-f', 'x11grab', '-framerate', '30', '-video_size', size,
-                '-i', process.env.DISPLAY || ':0',
-                '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-                file]);
-        } catch (e) { return { ok: false, error: 'Could not start ffmpeg: ' + e.message }; }
-        recProc = child;
-        recPath = file;
-        trackedProcs.add(child);
-        const drop = () => { trackedProcs.delete(child); if (recProc === child) recProc = null; };
-        child.on('error', drop);
-        child.on('close', drop);
-        return { ok: true, path: file };
-    });
-    ipcMain.handle('record:stop', async () => {
-        const p = recProc;
-        if (!p) return { ok: false, error: 'Not recording.' };
-        // SIGINT lets ffmpeg write the MP4 trailer so the file is playable;
-        // the close handler (above) clears recProc. 6s grace, then report.
-        const done = new Promise((resolve) => { p.once('close', resolve); setTimeout(resolve, 6000); });
-        try { p.kill('SIGINT'); } catch {}
-        await done;
-        let sizeMb = 0;
-        try { sizeMb = Math.round(fs.statSync(recPath).size / (1024 * 1024) * 10) / 10; } catch {}
-        return { ok: true, path: recPath, sizeMb };
-    });
 
     ipcMain.handle('system:net', () => {
         // Return raw counters; the renderer diffs successive calls to derive
@@ -2184,53 +1671,6 @@ function registerIpc() {
             return { rxBytes: 0, txBytes: 0, t: Date.now(), available: false,
                      error: e.message };
         }
-    });
-
-    ipcMain.handle('system:inventory', async () => {
-        // Static inventory loaded once per System Core visit. All fields are
-        // optional — missing tools/files just produce empty strings instead
-        // of failing the whole call.
-        const result = {
-            hostname: os.hostname(),
-            platform: process.platform,
-            kernel: os.release(),
-            outlawVersion: APP_VERSION,
-            packages: 0,
-            sessionPref: '',
-            snapshotMb: 0,
-            apparmor: '',
-            ufw: '',
-            bootSince: '',
-            available: IS_LINUX,
-        };
-        if (!IS_LINUX) return result;
-
-        // Run the cheap probes in parallel — total wall time ~150–300ms.
-        const [pacman, sessPref, snapDu, appArmor, ufwStatus, bootSince] = await Promise.all([
-            runShell('pacman -Q 2>/dev/null | wc -l', { timeout: 4000 }),
-            runShell('cat "$HOME/.outlaw-session-pref" 2>/dev/null', { timeout: 1000 }),
-            // Best-effort snapshot disk usage — only for the installed CodeMaker
-            // path. If CodeMaker isn't installed, just return 0.
-            // awk program is SINGLE-quoted so bash (via runShell's `bash -c`)
-            // doesn't expand `$1` to an empty positional param before awk sees it
-            // — a double-quoted awk body made this always fail and report 0 MB.
-            runShell(
-                'find /opt/outlaw-codemaker -path "*/.outlaw/snapshots" -prune -print 2>/dev/null ' +
-                "| xargs -I{} du -sm {} 2>/dev/null | awk '{s+=$1} END {print s+0}'",
-                { timeout: 4000 },
-            ),
-            runShell('systemctl is-active apparmor 2>/dev/null', { timeout: 2000 }),
-            runShell('ufw status 2>/dev/null | head -n 1 | sed "s/Status: //"', { timeout: 2000 }),
-            runShell('uptime -s 2>/dev/null', { timeout: 1500 }),
-        ]);
-
-        result.packages = parseInt(pacman.stdout, 10) || 0;
-        result.sessionPref = (sessPref.stdout || '').trim() || 'ask';
-        result.snapshotMb = parseInt(snapDu.stdout, 10) || 0;
-        result.apparmor = (appArmor.stdout || '').trim() || 'inactive';
-        result.ufw = (ufwStatus.stdout || '').trim() || 'inactive';
-        result.bootSince = (bootSince.stdout || '').trim();
-        return result;
     });
 
     // ----- SC3 System Core diagnostics ------------------------------------
@@ -2319,54 +1759,6 @@ function registerIpc() {
         }
         return result;
     }
-
-    ipcMain.handle('scheduled:status', async () => {
-        const out = {};
-        for (const id of Object.keys(SCHEDULED_PROFILES)) {
-            out[id] = await _schedStatusOne(id);
-        }
-        return out;
-    });
-
-    ipcMain.handle('scheduled:enable', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw Server.' };
-        const entry = SCHEDULED_PROFILES[id];
-        if (!entry) return { ok: false, error: 'Unknown schedule id.' };
-        // --now also kicks off the timer immediately so it starts counting
-        // toward the next OnCalendar trigger.
-        const r = await runShell(
-            `systemctl --user enable --now ${entry.timer}`,
-            { timeout: 8000 },
-        );
-        if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout || '').slice(-300) };
-        return { ok: true };
-    });
-
-    ipcMain.handle('scheduled:disable', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw Server.' };
-        const entry = SCHEDULED_PROFILES[id];
-        if (!entry) return { ok: false, error: 'Unknown schedule id.' };
-        const r = await runShell(
-            `systemctl --user disable --now ${entry.timer}`,
-            { timeout: 8000 },
-        );
-        if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout || '').slice(-300) };
-        return { ok: true };
-    });
-
-    ipcMain.handle('scheduled:run-now', async (_e, id) => {
-        if (!IS_LINUX) return { ok: false, error: 'Scheduled checks run on Outlaw Server.' };
-        const entry = SCHEDULED_PROFILES[id];
-        if (!entry) return { ok: false, error: 'Unknown schedule id.' };
-        // start the instance directly so it runs whether the timer is enabled
-        // or not. The user expects "run now" to mean "run now".
-        const r = await runShell(
-            `systemctl --user start outlaw-diagnose@${entry.profile}.service`,
-            { timeout: 5000 },
-        );
-        if (r.code !== 0) return { ok: false, error: (r.stderr || r.stdout || '').slice(-300) };
-        return { ok: true, started: entry.profile };
-    });
 
     // ----- Live-ISO detection ---------------------------------------------
     // /run/archiso exists only when booted from the live ISO. On installed
@@ -2772,7 +2164,6 @@ function registerIpc() {
             updateRepo: settings.updateRepo,
             vramSaverMode: settings.vramSaverMode,
             autoLockMin: settings.autoLockMin,
-            autoSleepMin: settings.autoSleepMin,
             screenBlankMin: settings.screenBlankMin,
         };
         const merged = { ...settings, ...(patch || {}) };
@@ -2786,7 +2177,7 @@ function registerIpc() {
         }
         // Power management — re-sync the idle watch / X blanking timers as soon
         // as the user changes them (no restart needed).
-        if (before.autoLockMin !== settings.autoLockMin || before.autoSleepMin !== settings.autoSleepMin) {
+        if (before.autoLockMin !== settings.autoLockMin) {
             syncIdleWatch();
         }
         if (before.screenBlankMin !== settings.screenBlankMin) {
@@ -3057,38 +2448,6 @@ function registerIpc() {
         return { text: 'Nothing to do.' };
     });
 
-    // --- Gaming ---
-    ipcMain.handle('gaming:status', async () => {
-        const out = { gamemode: false, mangohud: false, gpu: '' };
-        if (IS_LINUX) {
-            out.gamemode = !!(await which('gamemoded'));
-            out.mangohud = !!(await which('mangohud'));
-            const r = await runShell("lspci 2>/dev/null | grep -Ei 'vga|3d' | sed 's/^.*: //' | head -n 1");
-            out.gpu = r.stdout;
-        }
-        return out;
-    });
-
-    ipcMain.handle('gaming:performance', async (_e, on) => {
-        settings = saveSettings({ ...settings, performanceMode: !!on });
-        if (IS_LINUX) {
-            // Best-effort governor switch via the polkit-allowed helper.
-            await runShell(`pkexec /usr/local/bin/outlaw-perf ${on ? 'performance' : 'schedutil'} 2>/dev/null || true`, { timeout: 8000 });
-        }
-        return { ok: true, performanceMode: settings.performanceMode };
-    });
-
-    // --- Power / hotswap ---
-    ipcMain.handle('power:boot-targets', async () => {
-        if (!IS_LINUX) return [];
-        const r = await runShell('outlaw-hotswap --list 2>/dev/null');
-        return r.stdout.split('\n').filter(Boolean);
-    });
-    ipcMain.handle('power:hotswap', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Hotswap runs on Outlaw Server.' };
-        launchDetached('outlaw-term', ['Outlaw Hotswap', 'outlaw-hotswap'], { focus: false });
-        return { ok: true };
-    });
     ipcMain.handle('power:reboot', async () => {
         if (!IS_LINUX) return { ok: true };
         const r = await runShell('systemctl reboot');
@@ -3105,19 +2464,6 @@ function registerIpc() {
         if (r.code !== 0) {
             const err = (r.stderr || r.stdout || ('exit ' + r.code)).slice(-300);
             try { errorlog.append('error', 'power', 'shutdown failed: ' + err); } catch {}
-            return { ok: false, error: err };
-        }
-        return { ok: true };
-    });
-    // Sleep / suspend-to-RAM. Non-destructive and instantly reversible (any key/
-    // power press wakes the machine), so no confirmation. logind normally allows
-    // an active local session to suspend without a password.
-    ipcMain.handle('power:suspend', async () => {
-        if (!IS_LINUX) return { ok: true };
-        const r = await runShell('systemctl suspend');
-        if (r.code !== 0) {
-            const err = (r.stderr || r.stdout || ('exit ' + r.code)).slice(-300);
-            try { errorlog.append('error', 'power', 'suspend failed: ' + err); } catch {}
             return { ok: false, error: err };
         }
         return { ok: true };
@@ -3369,37 +2715,6 @@ function registerIpc() {
     // bootloader, so it can't affect booting. detect/packages are read-only;
     // apply/revert self-elevate via pkexec (passwordless polkit allowlist).
     const DRIVER_PROFILE = '/usr/local/bin/outlaw-driver-profile';
-    ipcMain.handle('drivers:detect', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw Server.' };
-        const r = await runShell(`${DRIVER_PROFILE} detect`, { timeout: 8000 });
-        try { return { ok: true, ...JSON.parse(r.stdout || '{}') }; }
-        catch { return { ok: false, error: 'Could not detect the graphics hardware.' }; }
-    });
-    ipcMain.handle('drivers:preview', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw Server.' };
-        const r = await runShell(`${DRIVER_PROFILE} packages`, { timeout: 8000 });
-        return { ok: true, packages: (r.stdout || '').trim().split(/\s+/).filter(Boolean) };
-    });
-    ipcMain.handle('drivers:apply', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw Server.' };
-        // Phase 12: stream to the loading screen (live phases + log) instead of a
-        // single blocking call with output dumped at the end.
-        const labels = ['Preparing', 'Refreshing databases', 'Installing graphics packages', 'Finishing'];
-        const matchers = [
-            null,
-            /Synchronizing|Refreshing|multilib|keyring/i,
-            /Installing|downloading|reinstalling|^:: |\(\d+\/\d+\)/i,
-            /^>> Done|installation finished|complete/i,
-        ];
-        return runStreamingJob('pkexec', [DRIVER_PROFILE, 'apply', 'gaming'], labels, matchers);
-    });
-    ipcMain.handle('drivers:revert', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Graphics profiles run on Outlaw Server.' };
-        const r = await runShell(`pkexec ${DRIVER_PROFILE} revert`, { timeout: 1000 * 60 * 5 });
-        return r.code === 0
-            ? { ok: true, output: (r.stdout || '').slice(-800) }
-            : { ok: false, error: (r.stderr || r.stdout || 'Revert failed.').slice(-800) };
-    });
 
     // (The old "Tune This PC" feature was removed — the AI assistant now handles
     // per-machine setting changes directly via set_setting. The outlaw-tune helper
@@ -3429,69 +2744,6 @@ function registerIpc() {
         return { ok: true, killed: n };
     });
 
-    // --- Session preference (set by greeter's "Always start in this session"
-    // checkbox; reset here so the greeter shows on next boot). ------------
-    ipcMain.handle('session:reset-greeter-pref', () => {
-        if (!IS_LINUX) return { ok: false, error: 'Greeter pref lives on Outlaw Server.' };
-        const prefPath = path.join(os.homedir(), '.outlaw-session-pref');
-        try {
-            // Writing "ask" is more explicit than deleting — the greeter's
-            // readPref() handles both, but a present file makes the user's
-            // intent obvious if they ever cat it.
-            fs.writeFileSync(prefPath, 'ask\n', { mode: 0o600 });
-            return { ok: true };
-        } catch (err) {
-            return { ok: false, error: err.message };
-        }
-    });
-
-    // --- Session switching (Dev vs Desktop, via the boot greeter) ----------
-    // The shell can mark the next X session as "dev" by writing two files in
-    // the user's home: ~/.outlaw-session (the choice) and
-    // ~/.outlaw-session.honor-once (a one-shot signal to the greeter to skip
-    // its prompt). Then we quit so the X session ends — agetty autologin +
-    // .bash_profile + .xinitrc bring the user back into outlaw-codemaker.
-    ipcMain.handle('session:switch-dev', async () => {
-        if (!IS_LINUX) {
-            return { ok: false, error: 'Session switching runs on Outlaw Server.' };
-        }
-        try {
-            const home = os.homedir();
-            fs.writeFileSync(path.join(home, '.outlaw-session'), 'dev\n', { mode: 0o600 });
-            fs.writeFileSync(path.join(home, '.outlaw-session.honor-once'), '', { mode: 0o600 });
-        } catch (err) {
-            return { ok: false, error: err.message };
-        }
-        // Give the renderer a beat to render the "switching…" toast before we
-        // tear down the window.
-        setTimeout(() => {
-            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
-            app.quit();
-        }, 350);
-        return { ok: true };
-    });
-
-    // Is the Dev session actually runnable here? It is iff a Python interpreter
-    // (the CodeMaker venv first, else system python3) can import PyQt6 — i.e.
-    // CodeMaker will start instead of crashing. Mirrors /usr/local/bin/
-    // outlaw-codemaker. On the live ISO this is false until outlaw-setup-dev
-    // builds the venv. Lets the UI offer to download the dev env before a switch.
-    ipcMain.handle('session:dev-status', async () => {
-        if (!IS_LINUX) return { ready: false, reason: 'not-linux' };
-        const probe = 'p=/opt/outlaw-codemaker/.venv/bin/python; [ -x "$p" ] || p="$(command -v python3)"; '
-            + '{ [ -n "$p" ] && "$p" -c "import PyQt6.QtCore" >/dev/null 2>&1 && echo READY; } || echo NOPE';
-        const r = await runShell(probe, { timeout: 8000 });
-        return { ready: /READY/.test(r.stdout || '') };
-    });
-
-    // Download + build the Dev environment on demand (live ISO / repair). It's
-    // long and network-heavy, so run it in a visible terminal (outlaw-term
-    // focuses it + holds it open) rather than silently in the background.
-    ipcMain.handle('session:setup-dev', async () => {
-        if (!IS_LINUX) return { ok: false, error: 'Runs on Outlaw Server.' };
-        launchDetached('outlaw-term', ['Set up Dev session', 'outlaw-setup-dev'], { focus: false });
-        return { ok: true };
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -3572,40 +2824,11 @@ app.whenReady().then(() => {
     // very next boot, even for users who set it before this feature existed (they
     // wouldn't have re-saved settings). Cheap one-shot write.
     mirrorThemeToHome(settings && settings.theme);
-    // Re-apply the user's saved keyboard layout for the session (setxkbmap is
-    // session-global and resets to the default each login).
-    applyKbLayout(settings && settings.kbLayout);
-    // Re-apply saved night light (X gamma resets each login) and Do Not Disturb.
-    // DND is delayed a few seconds because dunst is still coming up from .xinitrc
-    // when the shell launches; night light needs no daemon so it applies at once.
-    if (settings && settings.nightLight) applyNightLight(true, settings.nightLightTemp);
-    if (settings && settings.dnd) setTimeout(() => applyDnd(true), 4000);
-    // Power management — restore the saved screen-blank timers and start the
-    // idle watch (a no-op interval-wise when both timeouts are 0/off).
+    // Restore the saved screen-blank timer and start the idle watch. Both are
+    // no-ops unless configured: syncIdleWatch creates no interval at all when
+    // auto-lock is off.
     applyScreenBlank(settings && settings.screenBlankMin);
     syncIdleWatch();
-    // Display — re-apply modes the user explicitly KEPT, but only after
-    // re-validating each against what xrandr lists right now (monitor swapped
-    // or mode gone → skip silently, native mode stays). Never-break-boot:
-    // an invalid/failed apply changes nothing. Brightness likewise (floored).
-    if (IS_LINUX && settings && settings.displayModes && Object.keys(settings.displayModes).length) {
-        (async () => {
-            try {
-                const outputs = await _displayInfo();
-                for (const [name, m] of Object.entries(settings.displayModes)) {
-                    if (!m || !m.mode) continue;
-                    const o = outputs.find((x) => x.name === name);
-                    const mm = o && o.modes.find((x) => x.mode === m.mode);
-                    if (!mm) continue;
-                    const rate = (m.rate && mm.rates.includes(m.rate)) ? m.rate : '';
-                    await _xrandrApply(name, m.mode, rate);
-                }
-            } catch { /* display restore is best-effort */ }
-        })();
-    }
-    if (IS_LINUX && settings && Number(settings.brightnessPct) >= 5) {
-        try { applyBrightnessPct(settings.brightnessPct); } catch { /* best-effort */ }
-    }
     createWindow();
     startAutoCheck();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

@@ -1642,7 +1642,19 @@ let currentDir = null;
 let parentDir = null;
 let _fsFilter = '';
 async function loadFiles(dir) {
-    const res = await api.files.list(dir);
+    // In the browser panel this whole namespace rejects (files still run only in
+    // the local Electron panel). Unhandled, that threw straight past the render
+    // and landed in the crash reporter — so the screen stayed blank and the
+    // explanation went somewhere the user never looks. Catch it and say so on
+    // the screen instead: "degrade visibly" has to mean visible HERE.
+    let res;
+    try {
+        res = await api.files.list(dir);
+    } catch (e) {
+        const list = $('#fs-list');
+        if (list) list.innerHTML = `<div class="muted" style="padding:10px;">${_escapeHtml((e && e.message) || String(e))}</div>`;
+        return;
+    }
     if (res.error) { toast(res.error); }
     currentDir = res.path; parentDir = res.parent;
     renderBreadcrumb(res.path);
